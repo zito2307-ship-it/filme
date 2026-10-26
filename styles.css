@@ -79,7 +79,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .kopf p { margin: 4px 0 0; color: var(--fg3); font-size: 14px; }
 
 /* Filmraster */
-.raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 14px 10px; }
+.raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 14px 10px; }
 @media (min-width: 560px) { .raster { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 18px 14px; } }
 .karte { background: none; border: 0; padding: 0; text-align: left; color: inherit; display: block; width: 100%; }
 .plakat { aspect-ratio: 2/3; border-radius: 12px; background: var(--bg3); overflow: hidden; position: relative; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
