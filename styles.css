@@ -153,6 +153,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .sterne { display: flex; gap: 4px; flex-wrap: wrap; }
 .sterne button { width: 34px; height: 34px; border-radius: 9px; background: var(--bg2); border: 1px solid var(--line); font-weight: 700; font-size: 14px; color: var(--fg2); }
 .sterne button[aria-pressed="true"] { background: var(--akzent); color: var(--akzent-fg); border-color: transparent; }
+.sterne.dez { margin-top: 6px; }
+.sterne.dez button { width: 30px; height: 28px; font-size: 12px; font-weight: 600; border-radius: 7px; }
+.sterne.dez button:disabled { opacity: .35; cursor: default; }
 .sterne button.unter { background: var(--akzent-weich); border-color: color-mix(in srgb, var(--akzent) 40%, transparent); }
 .bewertung-box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-top: 10px; }
 .bewertung-box .wer { font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; }

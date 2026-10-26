@@ -13,6 +13,7 @@
   let toastTimer;
   function toast(msg) { toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.hidden = true, 2600); }
   const bild = (pfad, groesse) => pfad ? IMG + groesse + pfad : "";
+  const pkt = p => (Math.round(p * 10) / 10).toLocaleString("de-DE", { maximumFractionDigits: 1 });
   const ICON = {
     watchlist: '<svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>',
     gesehen: '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
@@ -91,7 +92,7 @@
     return l;
   }
   function karte(f) {
-    const eigene = (f.bewertungen || []).map(b => `<span>${esc(kurz(b.user_id))} ${b.punkte}</span>`).join("");
+    const eigene = (f.bewertungen || []).map(b => `<span>${esc(kurz(b.user_id))} ${pkt(b.punkte)}</span>`).join("");
     return `<button class="karte" data-id="${f.id}" type="button">
       <div class="plakat">${f.poster ? `<img src="${bild(f.poster, "w342")}" alt="" loading="lazy">` : `<div class="ohne">${esc(f.titel)}</div>`}
         ${f.imdb_rating ? `<span class="eck">★ ${f.imdb_rating}</span>` : ""}${f.rt_rating != null ? `<span class="eck rt">🍅 ${f.rt_rating}%</span>` : ""}
@@ -365,20 +366,38 @@
   function bewertungenHTML(f) {
     const meine = eigeneWertung(f, S.user.id);
     const andere = (f.bewertungen || []).filter(b => b.user_id !== S.user.id);
-    const sterne = Array.from({ length: 10 }, (_, i) => i + 1).map(n => `<button type="button" data-p="${n}" aria-pressed="${meine && meine.punkte === n}" class="${meine && n < meine.punkte ? "unter" : ""}">${n}</button>`).join("");
-    return `<div class="bewertung-box"><div class="wer"><span>${esc((ich() || {}).name || "Ich")}</span><b id="meine-punkte">${meine ? meine.punkte + "/10" : "noch offen"}</b></div>
-        <div class="sterne" id="sterne">${sterne}</div>
+    const ganz = meine ? Math.floor(meine.punkte) : null, dez = meine ? Math.round((meine.punkte - ganz) * 10) : 0;
+    const ganze = Array.from({ length: 10 }, (_, i) => i + 1).map(n => `<button type="button" data-g="${n}" aria-pressed="${ganz === n}" class="${ganz != null && n < ganz ? "unter" : ""}">${n}</button>`).join("");
+    const dezimale = Array.from({ length: 10 }, (_, i) => i).map(n => `<button type="button" data-d="${n}" aria-pressed="${meine != null && dez === n}" ${ganz == null || ganz === 10 ? "disabled" : ""}>,${n}</button>`).join("");
+    return `<div class="bewertung-box"><div class="wer"><span>${esc((ich() || {}).name || "Ich")}</span><b id="meine-punkte">${meine ? pkt(meine.punkte) + "/10" : "noch offen"}</b></div>
+        <div class="sterne" id="sterne">${ganze}</div>
+        <div class="sterne dez" id="dezimale">${dezimale}</div>
         <textarea id="kommentar" placeholder="Kurzer Kommentar (optional)">${esc(meine ? meine.kommentar || "" : "")}</textarea>
         <div class="reihe" style="margin-top:8px;justify-content:flex-end"><button class="btn klein" id="kommentar-speichern" type="button">Kommentar speichern</button></div></div>
-      ${andere.map(b => `<div class="bewertung-box"><div class="wer"><span>${esc(nameVon(b.user_id))}</span><b>${b.punkte}/10</b></div>${b.kommentar ? `<div class="kommentar">„${esc(b.kommentar)}“</div>` : ""}</div>`).join("")}
+      ${andere.map(b => `<div class="bewertung-box"><div class="wer"><span>${esc(nameVon(b.user_id))}</span><b>${pkt(b.punkte)}/10</b></div>${b.kommentar ? `<div class="kommentar">„${esc(b.kommentar)}“</div>` : ""}</div>`).join("")}
       ${S.profile.filter(p => p.id !== S.user.id && !andere.some(b => b.user_id === p.id)).map(p => `<div class="bewertung-box"><div class="wer"><span>${esc(p.name)}</span><span style="color:var(--fg3)">hat noch nicht bewertet</span></div></div>`).join("")}`;
   }
   function bewertungBinden(f, p) {
-    const st = $("#sterne", p); if (!st) return;
-    st.querySelectorAll("button").forEach(b => b.onclick = async () => {
-      const punkte = parseInt(b.dataset.p); const bew = await bewerten(f, punkte, $("#kommentar", p).value.trim()); if (!bew) return;
-      st.querySelectorAll("button").forEach(x => { const n = parseInt(x.dataset.p); x.setAttribute("aria-pressed", n === punkte); x.classList.toggle("unter", n < punkte); });
-      $("#meine-punkte", p).textContent = punkte + "/10"; toast("Bewertet: " + punkte + "/10"); render();
+    const st = $("#sterne", p), dz = $("#dezimale", p); if (!st) return;
+    const zeichne = punkte => {
+      const ganz = Math.floor(punkte), dez = Math.round((punkte - ganz) * 10);
+      st.querySelectorAll("button").forEach(x => { const n = parseInt(x.dataset.g); x.setAttribute("aria-pressed", n === ganz); x.classList.toggle("unter", n < ganz); });
+      dz.querySelectorAll("button").forEach(x => { x.disabled = ganz === 10; x.setAttribute("aria-pressed", parseInt(x.dataset.d) === dez); });
+      $("#meine-punkte", p).textContent = pkt(punkte) + "/10";
+    };
+    const speichere = async punkte => {
+      punkte = Math.min(10, Math.max(1, Math.round(punkte * 10) / 10));
+      const bew = await bewerten(f, punkte, $("#kommentar", p).value.trim()); if (!bew) return;
+      zeichne(punkte); toast("Bewertet: " + pkt(punkte) + "/10"); render();
+    };
+    st.querySelectorAll("button").forEach(b => b.onclick = () => {
+      const meine = eigeneWertung(f, S.user.id); const ganz = parseInt(b.dataset.g);
+      const dez = meine && Math.floor(meine.punkte) === ganz ? Math.round((meine.punkte - ganz) * 10) : 0;
+      speichere(ganz === 10 ? 10 : ganz + dez / 10);
+    });
+    dz.querySelectorAll("button").forEach(b => b.onclick = () => {
+      const meine = eigeneWertung(f, S.user.id); if (!meine) { toast("Erst die ganze Zahl wählen."); return; }
+      speichere(Math.floor(meine.punkte) + parseInt(b.dataset.d) / 10);
     });
     $("#kommentar-speichern", p).onclick = async () => {
       const meine = eigeneWertung(f, S.user.id); if (!meine) { toast("Erst Punkte vergeben."); return; }
