@@ -105,8 +105,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .zeile .offen { background: none; border: 0; padding: 0; text-align: left; color: inherit; display: flex; gap: 12px; flex: 1; min-width: 0; }
 
 /* Bottom-Sheet / Detail */
-.schleier { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; display: flex; align-items: flex-end; justify-content: center; animation: ein .18s ease; }
-@keyframes ein { from { opacity: 0; } }
+.schleier { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; display: flex; align-items: flex-end; justify-content: center; }
 .panel { background: var(--sheet); width: 100%; max-width: 720px; max-height: 94vh; max-height: 94dvh; overflow-y: auto; border-radius: 22px 22px 0 0; position: relative; animation: hoch .25s cubic-bezier(.2,.8,.2,1); -webkit-overflow-scrolling: touch; }
 @keyframes hoch { from { transform: translateY(40px); } }
 @media (min-width: 760px) { .schleier { align-items: center; padding: 24px; } .panel { border-radius: 22px; max-height: 90vh; } }
