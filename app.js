@@ -6,7 +6,7 @@
   const S = { session: null, user: null, profile: [], filme: [], serien: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
     genre: { watchlist: null, gesehen: null, zufall: new Set(), fuerdich: null }, sort: { watchlist: "neu", gesehen: "neu" },
     suche: "", ergebnisse: null, personen: null, person: null, personSort: "beliebt", beliebt: null, empfCache: {}, empfVeraltet: false, empfBasis: "alle",
-    ansicht: "raster", rang: { wer: "beide", nur: "alle" }, empfArt: "filme", personArt: "filme",
+    ansicht: "raster", rang: { wer: "beide", nur: "alle" }, empfArt: "filme", personArt: "filme", wlAnsicht: "gemeinsam",
     zufall: { quelle: "watchlist", max: 0, ergebnis: null, dreht: false, ton: localStorage.getItem("filmabend-ton") !== "aus" } };
 
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -99,6 +99,8 @@
     S.filme.forEach(f => (f.bewertungen || []).forEach(b => mitTokens(b).forEach(x => { if (x !== "allein" && !x.startsWith("@")) s.add(x); })));
     return [...s].sort((a, b) => a.localeCompare(b, "de"));
   }
+  const merklisteVon = (f, uid) => f.status === "merkliste" && f.hinzugefuegt_von === uid;
+  const statusText = f => f.status === "gesehen" ? "✓ Schon gesehen" : f.status === "watchlist" ? "✓ Auf der Watchlist" : f.hinzugefuegt_von === S.user.id ? "✓ Auf deiner Merkliste" : `✓ Auf ${esc(nameVon(f.hinzugefuegt_von))}s Merkliste`;
   const wegenText = w => w.startsWith("Serie: ") ? `Weil ihr die Serie „${esc(w.slice(7))}“ feiert` : w.startsWith("Film: ") ? `Weil ihr den Film „${esc(w.slice(6))}“ feiert` : `Weil ihr „${esc(w)}“ mögt`;
   function genresVon(filme) { const m = new Map(); filme.forEach(f => (f.genres || []).forEach(g => m.set(g, (m.get(g) || 0) + 1))); return [...m.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]); }
   function sortiere(filme, art) {
@@ -123,25 +125,29 @@
 
   /* ---------- Watchlist / Gesehen ---------- */
   function renderListe(status) {
-    const alle = S.filme.filter(f => f.status === status);
+    if (status === "watchlist" && S.wlAnsicht !== "gemeinsam" && S.wlAnsicht !== S.user.id && !S.profile.some(p => p.id === S.wlAnsicht)) S.wlAnsicht = "gemeinsam";
+    const merk = status === "watchlist" && S.wlAnsicht !== "gemeinsam" ? S.wlAnsicht : null;
+    const alle = merk ? S.filme.filter(f => merklisteVon(f, merk)) : S.filme.filter(f => f.status === status);
     const genres = genresVon(alle);
     const g = S.genre[status] && genres.includes(S.genre[status]) ? S.genre[status] : (S.genre[status] = null);
     const liste = sortiere(g ? alle.filter(f => f.genres.includes(g)) : alle, S.sort[status]);
-    const titel = status === "watchlist" ? "Watchlist" : "Gesehen";
+    const titel = merk ? (merk === S.user.id ? "Meine Merkliste" : `${nameVon(merk)}s Merkliste`) : status === "watchlist" ? "Watchlist" : "Gesehen";
+    const wlUmschalter = status === "watchlist" ? `<div class="umschalter"><button data-wl="gemeinsam" aria-pressed="${!merk}" type="button">Gemeinsam</button><button data-wl="${S.user.id}" aria-pressed="${merk === S.user.id}" type="button">Meine Merkliste</button>${andereProfile().map(p => `<button data-wl="${p.id}" aria-pressed="${merk === p.id}" type="button">${esc(p.name)}s</button>`).join("")}</div>` : "";
     const sortOpts = status === "watchlist" ? [["neu", "Zuletzt eingetragen"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]]
       : [["gesehen", "Zuletzt gesehen"], ["wertung", "Unsere Wertung"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]];
     if (!S.sort[status] || !sortOpts.some(o => o[0] === S.sort[status])) S.sort[status] = sortOpts[0][0];
     const rang = status === "gesehen" && S.ansicht === "rangliste";
-    view.innerHTML = `<div class="kopf"><h1>${titel}</h1><p>${alle.length} ${alle.length === 1 ? "Film" : "Filme"}${status === "watchlist" ? " zum Schauen" : ""}</p></div>
-      ${schluesselHinweis()}
+    view.innerHTML = `<div class="kopf"><h1>${titel}</h1><p>${alle.length} ${alle.length === 1 ? "Film" : "Filme"}${merk ? (merk === S.user.id ? " nur für dich gemerkt" : " gemerkt") : status === "watchlist" ? " zum Schauen" : ""}</p></div>
+      ${schluesselHinweis()}${wlUmschalter}
       ${status === "gesehen" && alle.length ? `<div class="umschalter"><button data-a="raster" aria-pressed="${!rang}" type="button">Alle Filme</button><button data-a="rangliste" aria-pressed="${rang}" type="button">Rangliste</button></div>` : ""}
       ${rang ? ranglisteHTML(alle) : `
       ${genres.length > 1 ? `<div class="chips"><button class="chip" data-g="" aria-pressed="${!g}">Alle</button>${genres.map(x => `<button class="chip" data-g="${esc(x)}" aria-pressed="${g === x}">${esc(x)}</button>`).join("")}</div>` : ""}
       ${alle.length ? `<div class="werkzeug"><span>${liste.length} angezeigt</span><select id="sort">${sortOpts.map(o => `<option value="${o[0]}" ${S.sort[status] === o[0] ? "selected" : ""}>${o[1]}</option>`).join("")}</select></div>` : ""}
       ${liste.length ? `<div class="raster">${liste.map(karte).join("")}</div>`
-        : `<div class="empty"><b>${status === "watchlist" ? "Noch nichts auf der Watchlist" : "Noch nichts gesehen"}</b>${status === "watchlist" ? "Über „Suchen“ Filme eintragen." : "Markiere einen Film als gesehen, dann könnt ihr ihn bewerten."}</div>`}`}`;
+        : `<div class="empty"><b>${merk ? (merk === S.user.id ? "Deine Merkliste ist leer" : `${esc(nameVon(merk))} hat noch nichts gemerkt`) : status === "watchlist" ? "Noch nichts auf der Watchlist" : "Noch nichts gesehen"}</b>${merk ? (merk === S.user.id ? "Hier landen Filme, die du dir nur für dich merkst – über „Merken“ in der Suche." : "") : status === "watchlist" ? "Über „Suchen“ Filme eintragen." : "Markiere einen Film als gesehen, dann könnt ihr ihn bewerten."}</div>`}`}`;
     hinweisBinden();
-    view.querySelectorAll(".umschalter button").forEach(b => b.onclick = () => { S.ansicht = b.dataset.a; renderListe(status); });
+    view.querySelectorAll(".umschalter [data-wl]").forEach(b => b.onclick = () => { S.wlAnsicht = b.dataset.wl; renderListe("watchlist"); });
+    view.querySelectorAll(".umschalter [data-a]").forEach(b => b.onclick = () => { S.ansicht = b.dataset.a; renderListe(status); });
     if (rang) { ranglisteBinden(status); return; }
     view.querySelectorAll(".chip").forEach(c => c.onclick = () => { S.genre[status] = c.dataset.g || null; renderListe(status); });
     const sel = $("#sort"); if (sel) sel.onchange = () => { S.sort[status] = sel.value; renderListe(status); };
@@ -182,12 +188,12 @@
   /* ---------- Zufall: Spielautomat ---------- */
   function zufallKandidaten() {
     const z = S.zufall;
-    return S.filme.filter(f => (z.quelle === "alle" || f.status === "watchlist")
+    return S.filme.filter(f => (z.quelle === "alle" ? f.status !== "merkliste" : f.status === "watchlist")
       && (!S.genre.zufall.size || f.genres.some(g => S.genre.zufall.has(g)))
       && (!z.max || !f.laufzeit || f.laufzeit <= z.max));
   }
   function renderZufall() {
-    const z = S.zufall; const genres = genresVon(S.filme.filter(f => z.quelle === "alle" || f.status === "watchlist"));
+    const z = S.zufall; const genres = genresVon(S.filme.filter(f => z.quelle === "alle" ? f.status !== "merkliste" : f.status === "watchlist"));
     [...S.genre.zufall].forEach(g => { if (!genres.includes(g)) S.genre.zufall.delete(g); });
     const kand = zufallKandidaten(); const e = z.ergebnis && kand.find(f => f.id === z.ergebnis.id) ? z.ergebnis : null;
     view.innerHTML = `<div class="kopf"><h1>Zufall</h1><p>Keine Ahnung, was ihr schauen wollt? Der Automat entscheidet.</p></div>
@@ -283,7 +289,8 @@
     for (const f of S.filme) {
       const meine = eigeneWertung(f, S.user.id);
       if (basis === "gemeinsam" && !(f.status === "gesehen" && gemeinsam(f))) continue;
-      if (basis === "meine" && !(meine || (f.status === "watchlist" && f.hinzugefuegt_von === S.user.id))) continue;
+      if (basis === "meine" && !(meine || (f.status !== "gesehen" && f.hinzugefuegt_von === S.user.id))) continue;
+      if (basis !== "meine" && f.status === "merkliste") continue;
       const s = basis === "meine" && meine ? meine.punkte : schnitt(f); let gewicht;
       if (f.status === "gesehen") { if (s == null) gewicht = 1; else if (s >= 8) gewicht = 3; else if (s >= 6) gewicht = 1.5; else continue; }
       else gewicht = 0.8;
@@ -346,13 +353,13 @@
       <div class="offen" role="button" tabindex="0"><div class="plakat">${f.poster ? `<img src="${bild(f.poster, "w185")}" alt="" loading="lazy">` : `<div class="ohne">${esc(f.titel)}</div>`}</div>
         <div class="inhalt">${f.wegen && f.wegen.length ? `<div class="wegen">${wegenText(f.wegen[0])}</div>` : ""}<h3>${esc(f.titel)}</h3>
           <div class="u">${u}</div><p>${esc(f.beschreibung)}</p>
-          <div class="aktionen">${drin ? `<span class="ok">${drin.status === "gesehen" ? "✓ Schon gesehen" : "✓ Auf der Watchlist"}</span>` : `<button class="btn klein primary" data-add="watchlist" type="button">+ Watchlist</button><button class="btn klein" data-add="gesehen" type="button">Schon gesehen</button>`}</div>
+          <div class="aktionen">${drin ? `<span class="ok">${statusText(drin)}</span>${drin.status === "merkliste" ? `<button class="btn klein primary" data-add="watchlist" type="button">+ Watchlist</button>` : ""}` : `<button class="btn klein primary" data-add="watchlist" type="button">+ Watchlist</button><button class="btn klein" data-add="merkliste" type="button">Merken</button><button class="btn klein" data-add="gesehen" type="button">Schon gesehen</button>`}</div>
         </div></div></div>`;
   }
   function zeilenBinden(quelle) {
     view.querySelectorAll(".zeile").forEach(z => {
       const id = parseInt(z.dataset.tmdb); const f = quelle.find(x => x.tmdb_id === id);
-      z.querySelectorAll("[data-add]").forEach(b => b.onclick = ev => { ev.stopPropagation(); hinzufuegen(id, b.dataset.add, b); });
+      z.querySelectorAll("[data-add]").forEach(b => b.onclick = ev => { ev.stopPropagation(); const drin = S.filme.find(x => x.tmdb_id === id); if (drin) statusSetzen(drin, b.dataset.add, true); else hinzufuegen(id, b.dataset.add, b); });
       const oeffne = ev => { if (ev.target.closest("[data-add]")) return; const drin = S.filme.find(x => x.tmdb_id === id); if (drin) oeffneFilm(drin); else vorschau(id, f); };
       $(".offen", z).onclick = oeffne; $(".offen", z).onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); oeffne(ev); } };
     });
@@ -440,16 +447,21 @@
       delete film.omdb_aktiv;
       const neu = await Store.filmAnlegen({ ...film, status, hinzugefuegt_von: S.user.id, gesehen_am: status === "gesehen" ? heute() : null });
       neu.bewertungen = []; S.filme.unshift(neu); S.empfVeraltet = true;
-      toast(status === "gesehen" ? "Als gesehen eingetragen" : "Auf die Watchlist gesetzt");
+      toast(status === "gesehen" ? "Als gesehen eingetragen" : status === "merkliste" ? "Nur für dich gemerkt" : "Auf die Watchlist gesetzt");
       sheet.innerHTML = ""; render();
       if (status === "gesehen") oeffneFilm(neu);
       return neu;
-    } catch (x) { toast(fehlerText(x)); if (btn) { btn.disabled = false; btn.textContent = status === "gesehen" ? "Schon gesehen" : "+ Watchlist"; } }
+    } catch (x) { toast(fehlerText(x)); if (btn) { btn.disabled = false; btn.textContent = status === "gesehen" ? "Schon gesehen" : status === "merkliste" ? "Merken" : "+ Watchlist"; } }
   }
   function ersetze(neu) { const i = S.filme.findIndex(f => f.id === neu.id); if (i >= 0) { neu.bewertungen = S.filme[i].bewertungen || []; S.filme[i] = neu; } return neu; }
-  async function statusSetzen(f, status) {
-    try { const neu = ersetze(await Store.filmAendern(f.id, { status, gesehen_am: status === "gesehen" ? (f.gesehen_am || heute()) : null })); S.empfVeraltet = true; toast(status === "gesehen" ? "Als gesehen markiert" : "Zurück auf der Watchlist"); render(); oeffneFilm(neu); }
-    catch (x) { toast("Speichern fehlgeschlagen: " + x.message); }
+  async function statusSetzen(f, status, leise) {
+    try {
+      const daten = { status, gesehen_am: status === "gesehen" ? (f.gesehen_am || heute()) : null };
+      if (status === "merkliste") daten.hinzugefuegt_von = S.user.id;
+      const neu = ersetze(await Store.filmAendern(f.id, daten)); S.empfVeraltet = true;
+      toast(status === "gesehen" ? "Als gesehen markiert" : status === "merkliste" ? "Nur für dich gemerkt" : "Auf der gemeinsamen Watchlist");
+      render(); if (!leise) oeffneFilm(neu);
+    } catch (x) { toast("Speichern fehlgeschlagen: " + x.message); }
   }
   async function gesehenAm(f, d) { try { ersetze(await Store.filmAendern(f.id, { gesehen_am: d || null })); } catch (x) { toast("Datum nicht gespeichert"); } }
   async function aktualisieren(f, btn) {
@@ -570,18 +582,22 @@
     let d; try { d = (await Store.film("details", { tmdb_id })).film; } catch (x) { p.innerHTML = `<button class="zu" type="button">✕</button><div class="empty"><b>Konnte nicht laden</b>${esc(fehlerText(x))}</div>`; $(".zu", p).onclick = schliessen; return; }
     if (!sheet.contains(p)) return;
     p.innerHTML = `<button class="zu" type="button" aria-label="Schließen">✕</button>${detailHTML(d, false)}`; $(".zu", p).onclick = schliessen; trailerBinden(d); personenBinden(p); angeboteLaden($("#angebote", p), d, "film");
-    $("#aktionen", p).innerHTML = `<div class="status-reihe"><button class="btn primary" data-add="watchlist" type="button">+ Watchlist</button><button class="btn" data-add="gesehen" type="button">Schon gesehen</button></div>`;
+    $("#aktionen", p).innerHTML = `<div class="status-reihe"><button class="btn primary" data-add="watchlist" type="button">+ Watchlist</button><button class="btn" data-add="merkliste" type="button">Merken</button><button class="btn" data-add="gesehen" type="button">Schon gesehen</button></div>`;
     p.querySelectorAll("[data-add]").forEach(b => b.onclick = () => hinzufuegen(tmdb_id, b.dataset.add, b));
   }
   function oeffneFilm(f) {
     const p = panel(detailHTML(f, true)); trailerBinden(f); personenBinden(p); angeboteLaden($("#angebote", p), f, "film");
     const a = $("#aktionen", p);
     a.innerHTML = f.status === "watchlist"
-      ? `<div class="status-reihe"><button class="btn primary" id="gesehen" type="button">${ICON.gesehen} Gesehen – jetzt bewerten</button></div>`
+      ? `<div class="status-reihe"><button class="btn primary" id="gesehen" type="button">${ICON.gesehen} Gesehen – jetzt bewerten</button><button class="btn" id="merken" type="button" title="Von der gemeinsamen Watchlist auf deine private Merkliste">Nur merken</button></div>`
+      : f.status === "merkliste"
+      ? `<p class="meta-zeile" style="margin-top:14px">${f.hinzugefuegt_von === S.user.id ? "Steht nur auf deiner Merkliste – nicht auf der gemeinsamen Watchlist." : `Steht auf ${esc(nameVon(f.hinzugefuegt_von))}s privater Merkliste.`}</p>
+         <div class="status-reihe"><button class="btn primary" id="watchlist" type="button">Auf unsere Watchlist</button><button class="btn" id="gesehen" type="button">${ICON.gesehen} Gesehen</button></div>`
       : `<div class="status-reihe"><label class="feld" style="flex:1;margin:0"><span>Gesehen am</span><input type="date" id="gesehen_am" value="${f.gesehen_am || ""}"></label><button class="btn" id="watchlist" type="button" style="align-self:flex-end">Zurück auf Watchlist</button></div>
          <h3>Unsere Bewertung</h3>${bewertungenHTML(f)}`;
     if ($("#gesehen", p)) $("#gesehen", p).onclick = () => statusSetzen(f, "gesehen");
     if ($("#watchlist", p)) $("#watchlist", p).onclick = () => statusSetzen(f, "watchlist");
+    if ($("#merken", p)) $("#merken", p).onclick = () => statusSetzen(f, "merkliste");
     if ($("#gesehen_am", p)) $("#gesehen_am", p).onchange = ev => gesehenAm(f, ev.target.value);
     bewertungBinden(f, p);
     $("#unten", p).innerHTML = `<div class="meta-zeile">Eingetragen${f.hinzugefuegt_von ? " von " + esc(nameVon(f.hinzugefuegt_von)) : ""} am ${datum(f.erstellt_am)}${f.imdb_id ? ` · <a href="https://www.imdb.com/title/${esc(f.imdb_id)}/" target="_blank" rel="noopener">IMDb</a>` : ""}${f.lb_url ? ` · <a href="${esc(f.lb_url)}" target="_blank" rel="noopener">Letterboxd</a>` : ""}</div>

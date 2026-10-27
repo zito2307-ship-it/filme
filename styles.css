@@ -350,3 +350,4 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
   .angebot-kopf .name b { font-size: 13px; }
   .angebot-details { padding-left: 10px; }
 }
+.umschalter button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
