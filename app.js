@@ -488,6 +488,54 @@
     return `<div class="anbieter">${gruppe("Im Abo", a.streamen)}${gruppe("Leihen", a.leihen)}${gruppe("Kaufen", a.kaufen)}
       ${a.link ? `<div><a href="${esc(a.link)}" target="_blank" rel="noopener">Alle Angebote bei JustWatch →</a> <small style="color:var(--fg3)">Stand ${datum(a.stand)}</small></div>` : ""}</div>`;
   }
+  /* ---------- Anbieter & Preise (JustWatch) ---------- */
+  const angeboteCache = new Map();
+  S.nurDeutsch = localStorage.getItem("filmabend-nur-deutsch") === "an";
+  async function angeboteLaden(el, d, art) {
+    if (!el) return;
+    const key = art + ":" + d.tmdb_id;
+    let r = angeboteCache.get(key);
+    if (!r) {
+      el.innerHTML = `<div class="angebote-lade"><span class="lade"></span> Anbieter & Preise werden geladen …</div>`;
+      try { r = await Store.film("angebote", { tmdb_id: d.tmdb_id, titel: d.titel, original_titel: d.original_titel, jahr: d.jahr, art }); angeboteCache.set(key, r); } catch (x) { r = null; }
+    }
+    if (!el.isConnected) return;
+    if (!r || !r.gefunden || !r.anbieter.length) {
+      el.innerHTML = `${anbieterHTML(d.anbieter)}<p class="meta-zeile">${r && r.gefunden === false ? "Keine Preisangaben gefunden." : r ? "Derzeit kein Angebot in Deutschland bekannt." : "Preise gerade nicht erreichbar."} Liste oben laut TMDB/JustWatch.</p>`;
+      return;
+    }
+    const zeichne = () => {
+      el.innerHTML = angeboteHTML(r);
+      $("#nur-deutsch", el).onclick = () => { S.nurDeutsch = !S.nurDeutsch; localStorage.setItem("filmabend-nur-deutsch", S.nurDeutsch ? "an" : "aus"); zeichne(); };
+      el.querySelectorAll(".angebot-kopf").forEach(b => b.onclick = () => { const d = b.nextElementSibling; d.hidden = !d.hidden; b.setAttribute("aria-expanded", !d.hidden); });
+    };
+    zeichne();
+  }
+  function angeboteHTML(r) {
+    const preis = s => esc(String(s).replace(/\s+/g, " "));
+    const alle = r.anbieter, liste = S.nurDeutsch ? alle.filter(a => a.deutsch !== false) : alle;
+    const sprache = a => a.deutsch === true ? `<span class="tag de">Deutsch</span>` : a.deutsch === false ? `<span class="tag ov">${a.untertitel_de ? "OmU" : "nur OV"}</span>` : "";
+    const flatText = a => a.flat ? `✓ <small>${a.flat}</small>` : a.gratis ? `Gratis <small>${a.gratis}</small>` : a.werbung ? `Gratis <small>mit Werbung</small>` : "–";
+    const tabelle = a => {
+      const q = ["SD", "HD", "4K"].filter(x => a.leihen[x] || a.kaufen[x]);
+      return q.length ? `<table class="preise"><tr><th></th><th>Leihen</th><th>Kaufen</th></tr>${q.map(x => `<tr><td>${x}</td><td>${a.leihen[x] ? preis(a.leihen[x]) : "–"}</td><td>${a.kaufen[x] ? preis(a.kaufen[x]) : "–"}</td></tr>`).join("")}</table>` : "";
+    };
+    const zeile = (a, i) => `<div class="angebot">
+      <button class="angebot-kopf" type="button" aria-expanded="false">
+        <span class="logo">${a.logo ? `<img src="${esc(a.logo)}" alt="" loading="lazy">` : ""}</span>
+        <span class="name"><b>${esc(a.name)}</b>${sprache(a)}</span>
+        <span class="zelle${a.flat ? " ja" : ""}">${flatText(a)}</span>
+        <span class="zelle">${a.leihen_ab ? `ab ${preis(a.leihen_ab)}` : "–"}</span>
+        <span class="zelle">${a.kaufen_ab ? `ab ${preis(a.kaufen_ab)}` : "–"}</span>
+      </button>
+      <div class="angebot-details" hidden>${tabelle(a)}${a.url ? `<a class="btn klein" href="${esc(a.url)}" target="_blank" rel="noopener">Bei ${esc(a.name)} öffnen →</a>` : ""}</div></div>`;
+    return `<div class="angebote-kopf"><button class="chip" id="nur-deutsch" type="button" aria-pressed="${S.nurDeutsch}">Nur deutsche Fassung</button><small>${liste.length} ${liste.length === 1 ? "Anbieter" : "Anbieter"} in Deutschland</small></div>
+      <div class="angebote">
+        <div class="angebot-titel"><span></span><span>Anbieter</span><span>Flat</span><span>Leihen</span><span>Kaufen</span></div>
+        ${liste.length ? liste.map(zeile).join("") : `<div class="empty klein">Kein Anbieter mit deutscher Tonspur bekannt.</div>`}
+      </div>
+      <p class="meta-zeile">Preise laut JustWatch, Stand ${datum(r.stand)}.${r.jw_url ? ` <a href="${esc(r.jw_url)}" target="_blank" rel="noopener">Alle Details bei JustWatch →</a>` : ""} „Deutsch“ = deutsche Tonspur gemeldet, „OmU“/„nur OV“ = nur Original.</p>`;
+  }
   function detailHTML(d, gespeichert) {
     const u = [d.jahr, d.laufzeit ? d.laufzeit + " min" : null, (d.genres || []).join(", ")].filter(Boolean).join(" · ");
     const w = [];
@@ -509,7 +557,7 @@
         ${(d.schauspieler || []).length ? `<h3>Besetzung</h3><div class="personen">${d.schauspieler.map(p => personHTML(p, p.rolle)).join("")}</div>` : ""}
         ${crew ? `<h3>Hinter der Kamera</h3><div class="crew">${crew}</div>` : ""}
         ${(d.bilder || []).length ? `<h3>Bilder</h3><div class="galerie">${d.bilder.map(b => `<a href="${bild(b, "original")}" target="_blank" rel="noopener"><img src="${bild(b, "w500")}" alt="" loading="lazy"></a>`).join("")}</div>` : ""}
-        <h3>Wo schauen</h3>${anbieterHTML(d.anbieter)}
+        <h3>Wo schauen</h3><div id="angebote"></div>
         <div id="unten"></div>
       </div>`;
   }
@@ -521,12 +569,12 @@
     const p = panel(`<div class="empty"><span class="lade"></span><br><br>${esc((kompakt || {}).titel || "")}</div>`);
     let d; try { d = (await Store.film("details", { tmdb_id })).film; } catch (x) { p.innerHTML = `<button class="zu" type="button">✕</button><div class="empty"><b>Konnte nicht laden</b>${esc(fehlerText(x))}</div>`; $(".zu", p).onclick = schliessen; return; }
     if (!sheet.contains(p)) return;
-    p.innerHTML = `<button class="zu" type="button" aria-label="Schließen">✕</button>${detailHTML(d, false)}`; $(".zu", p).onclick = schliessen; trailerBinden(d); personenBinden(p);
+    p.innerHTML = `<button class="zu" type="button" aria-label="Schließen">✕</button>${detailHTML(d, false)}`; $(".zu", p).onclick = schliessen; trailerBinden(d); personenBinden(p); angeboteLaden($("#angebote", p), d, "film");
     $("#aktionen", p).innerHTML = `<div class="status-reihe"><button class="btn primary" data-add="watchlist" type="button">+ Watchlist</button><button class="btn" data-add="gesehen" type="button">Schon gesehen</button></div>`;
     p.querySelectorAll("[data-add]").forEach(b => b.onclick = () => hinzufuegen(tmdb_id, b.dataset.add, b));
   }
   function oeffneFilm(f) {
-    const p = panel(detailHTML(f, true)); trailerBinden(f); personenBinden(p);
+    const p = panel(detailHTML(f, true)); trailerBinden(f); personenBinden(p); angeboteLaden($("#angebote", p), f, "film");
     const a = $("#aktionen", p);
     a.innerHTML = f.status === "watchlist"
       ? `<div class="status-reihe"><button class="btn primary" id="gesehen" type="button">${ICON.gesehen} Gesehen – jetzt bewerten</button></div>`
@@ -627,6 +675,6 @@
   }
 
   // Gemeinsame Hilfen für serien.js
-  window.FA = { S, $, view, sheet, esc, datum, pkt, bild, toast, panel, schliessen, ICON, nameVon, kurz, ich, andereProfile, mitTokens, mitText, bekannteNamen, fehlerText, heute, personHTML, personenBinden, anbieterHTML, trailerBinden, schluesselHinweis, hinweisBinden, render, renderTabs, wegenText, filmSeeds: seeds };
+  window.FA = { S, $, view, sheet, esc, datum, pkt, bild, toast, panel, schliessen, ICON, nameVon, kurz, ich, andereProfile, mitTokens, mitText, bekannteNamen, fehlerText, heute, personHTML, personenBinden, anbieterHTML, trailerBinden, schluesselHinweis, hinweisBinden, render, renderTabs, wegenText, filmSeeds: seeds, angeboteLaden };
   start();
 })();

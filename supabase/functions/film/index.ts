@@ -245,6 +245,63 @@ async function empfehlungenTV(seeds: Seed[], ausschluss: number[], key: string, 
   return serien.map((s, i) => ({ ...s, wegen: [...sortiert[i].wegen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]) }));
 }
 
+/* ---------- Anbieter & Preise (JustWatch, Deutschland) ----------
+   TMDB liefert nur, WER einen Titel hat. Preise, Qualität (SD/HD/4K) und Tonspuren kommen von JustWatch
+   über dessen (inoffizielle) GraphQL-Schnittstelle. Nur Land DE, Sprache de. */
+const JW_URL = "https://apis.justwatch.com/graphql";
+const JW_QUERY = `query S($country: Country!, $language: Language!, $q: String!, $typen: [ObjectType!]) {
+  popularTitles(country: $country, first: 8, filter: { searchQuery: $q, objectTypes: $typen }) { edges { node {
+    id objectType content(country: $country, language: $language) { title originalReleaseYear fullPath externalIds { tmdbId } }
+    offers(country: $country, platform: WEB) { monetizationType presentationType retailPrice(language: $language) retailPriceValue currency standardWebURL audioLanguages subtitleLanguages package { packageId clearName technicalName icon } }
+  } } } }`;
+async function jwSuche(q: string, typ: string) {
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await fetch(JW_URL, { method: "POST", signal: ctl.signal, headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Filmabend, private Watchlist)", Accept: "application/json" }, body: JSON.stringify({ query: JW_QUERY, variables: { country: "DE", language: "de", q, typen: [typ] } }) });
+    if (!r.ok) throw new Error("justwatch_" + r.status);
+    const d = await r.json();
+    return (d.data?.popularTitles?.edges || []).map((e: any) => e.node);
+  } finally { clearTimeout(timer); }
+}
+const QUALITAET: Record<string, string> = { SD: "SD", HD: "HD", _4K: "4K", CANVAS: "HD" };
+const qRang = (q: string | null) => q === "4K" ? 3 : q === "HD" ? 2 : q === "SD" ? 1 : 0;
+const besser = (a: string | null, b: string) => qRang(b) > qRang(a) ? b : a;
+const preisWert = (s: string | null) => { if (!s) return Infinity; const n = parseFloat(String(s).replace(",", ".").replace(/[^\d.]/g, "")); return isNaN(n) ? Infinity : n; };
+function billigst(p: Record<string, string>) { let best: string | null = null; for (const v of Object.values(p)) if (preisWert(v) < preisWert(best)) best = v; return best; }
+async function angebote(tmdbId: number, titel: string, original: string | null, art: string) {
+  const typ = art === "serie" ? "SHOW" : "MOVIE";
+  let node: any = null;
+  for (const q of [...new Set([titel, original].filter(Boolean))] as string[]) {
+    const l = await jwSuche(q, typ);
+    node = l.find((n: any) => String(n.content?.externalIds?.tmdbId || "") === String(tmdbId));
+    if (node) break;
+  }
+  if (!node) return { gefunden: false, anbieter: [] };
+  const map = new Map<string, any>();
+  for (const o of node.offers || []) {
+    const q = QUALITAET[o.presentationType]; if (!q) continue; // DVD / Blu-ray-Händler raus
+    const pk = o.package || {}; const key = String(pk.packageId || pk.clearName);
+    const e = map.get(key) || { name: pk.clearName, kurz: pk.technicalName, logo: pk.icon ? "https://images.justwatch.com" + String(pk.icon).replace("{profile}", "s100") : null, url: null, flat: null, gratis: null, werbung: null, leihen: {}, kaufen: {}, audio: new Set<string>(), audioBekannt: false, untertitel_de: false };
+    const preis = o.retailPrice ? String(o.retailPrice).replace(/\s*€$/, " €") : (o.retailPriceValue != null ? Number(o.retailPriceValue).toFixed(2).replace(".", ",") + " €" : null);
+    if (o.monetizationType === "FLATRATE") e.flat = besser(e.flat, q);
+    else if (o.monetizationType === "FREE") e.gratis = besser(e.gratis, q);
+    else if (o.monetizationType === "ADS") e.werbung = besser(e.werbung, q);
+    else if (o.monetizationType === "RENT") { if (preis) e.leihen[q] = preis; }
+    else if (o.monetizationType === "BUY") { if (preis) e.kaufen[q] = preis; }
+    else continue;
+    if (!e.url && o.standardWebURL) e.url = o.standardWebURL;
+    if (Array.isArray(o.audioLanguages) && o.audioLanguages.length) { e.audioBekannt = true; o.audioLanguages.forEach((a: string) => e.audio.add(a)); }
+    if ((o.subtitleLanguages || []).includes("de")) e.untertitel_de = true;
+    map.set(key, e);
+  }
+  const liste = [...map.values()]
+    .filter(e => e.flat || e.gratis || e.werbung || Object.keys(e.leihen).length || Object.keys(e.kaufen).length)
+    .map(e => ({ name: e.name, kurz: e.kurz, logo: e.logo, url: e.url, flat: e.flat, gratis: e.gratis, werbung: e.werbung, leihen: e.leihen, kaufen: e.kaufen, leihen_ab: billigst(e.leihen), kaufen_ab: billigst(e.kaufen), deutsch: e.audioBekannt ? e.audio.has("de") : null, untertitel_de: e.untertitel_de }));
+  const gruppe = (a: any) => a.flat ? 0 : a.gratis ? 1 : a.werbung ? 2 : a.leihen_ab ? 3 : 4;
+  liste.sort((a, b) => gruppe(a) - gruppe(b) || qRang(b.flat) - qRang(a.flat) || preisWert(a.leihen_ab) - preisWert(b.leihen_ab) || preisWert(a.kaufen_ab) - preisWert(b.kaufen_ab) || a.name.localeCompare(b.name));
+  return { gefunden: true, jw_url: node.content?.fullPath ? "https://www.justwatch.com" + node.content.fullPath : null, titel: node.content?.title, jahr: node.content?.originalReleaseYear, anbieter: liste, stand: new Date().toISOString().slice(0, 10) };
+}
+
 async function omdb(imdbId: string, key: string) {
   try {
     const r = await fetch(`https://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(key)}`);
@@ -374,6 +431,12 @@ Deno.serve(async (req: Request) => {
 
   let body: any = {};
   try { body = await req.json(); } catch { return antwort({ fehler: "ungueltige anfrage" }, 400); }
+  if (body.aktion === "angebote") { // Anbieter & Preise, braucht keinen TMDB-Schlüssel
+    const id = parseInt(body.tmdb_id);
+    if (!id || !body.titel) return antwort({ fehler: "tmdb_id/titel fehlt" }, 400);
+    try { return antwort(await angebote(id, String(body.titel), body.original_titel ? String(body.original_titel) : null, String(body.art || "film"))); }
+    catch (e) { return antwort({ fehler: (e as Error).message || "justwatch" }, 502); }
+  }
   if (body.aktion === "letterboxd") { // nur Letterboxd-Wertung, braucht keinen TMDB-Schlüssel
     const id = parseInt(body.tmdb_id);
     return id ? antwort(await letterboxd(id)) : antwort({ fehler: "tmdb_id fehlt" }, 400);

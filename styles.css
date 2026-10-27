@@ -314,3 +314,39 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .panel.klein .zurueck-sheet { position: static; margin-bottom: 10px; }
 .sheet-h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg3); margin: 18px 0 8px; }
 .sheet-hinweis { font-size: 13px; color: var(--fg3); margin: -4px 0 10px; }
+
+/* Anbieter & Preise (wie werstreamt.es) */
+.angebote-lade { color: var(--fg3); font-size: 14px; display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.angebote-kopf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.angebote-kopf small { color: var(--fg3); font-size: 12px; }
+.angebote { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius-s); overflow: hidden; }
+.angebot-titel, .angebot-kopf { display: grid; grid-template-columns: 34px minmax(0, 1fr) 54px 68px 68px; gap: 8px; align-items: center; }
+.angebot-titel { padding: 8px 10px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg3); font-weight: 700; border-bottom: 1px solid var(--line); }
+.angebot-titel span:nth-child(n+3), .angebot-kopf .zelle { text-align: center; }
+.angebot { border-bottom: 1px solid var(--line); }
+.angebot:last-child { border-bottom: 0; }
+.angebot-kopf { width: 100%; background: none; border: 0; padding: 9px 10px; color: inherit; text-align: left; font: inherit; }
+.angebot-kopf[aria-expanded="true"] { background: color-mix(in srgb, var(--bg2) 60%, var(--bg)); }
+.angebot-kopf .logo { width: 34px; height: 34px; border-radius: 9px; overflow: hidden; background: var(--bg3); display: block; }
+.angebot-kopf .logo img { width: 100%; height: 100%; object-fit: cover; }
+.angebot-kopf .name { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.angebot-kopf .name b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.angebot-kopf .zelle { font-size: 13px; font-weight: 600; color: var(--fg2); white-space: nowrap; }
+.angebot-kopf .zelle small { font-size: 10px; color: var(--fg3); font-weight: 600; }
+.angebot-kopf .zelle.ja { color: var(--gruen); }
+.tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; width: max-content; }
+.tag.de { background: color-mix(in srgb, var(--gruen) 20%, transparent); color: var(--gruen); }
+.tag.ov { background: color-mix(in srgb, #E08A2E 22%, transparent); color: #E08A2E; }
+.angebot-details { padding: 4px 10px 12px 52px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.preise { border-collapse: collapse; font-size: 13px; }
+.preise th { font-weight: 700; color: var(--fg3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; text-align: left; padding: 2px 14px 4px 0; }
+.preise td { padding: 3px 14px 3px 0; color: var(--fg2); }
+.preise td:first-child { font-weight: 700; color: var(--fg); }
+.empty.klein { padding: 18px 12px; font-size: 14px; }
+@media (max-width: 420px) {
+  .angebot-titel, .angebot-kopf { grid-template-columns: 30px minmax(0, 1fr) 46px 60px 60px; gap: 6px; }
+  .angebot-kopf .logo { width: 30px; height: 30px; }
+  .angebot-kopf .zelle { font-size: 12px; }
+  .angebot-kopf .name b { font-size: 13px; }
+  .angebot-details { padding-left: 10px; }
+}

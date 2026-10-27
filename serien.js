@@ -192,7 +192,7 @@ window.Serien = (function () {
     let d; try { d = (await Store.film("serie_details", { tmdb_id })).serie; } catch (x) { p.innerHTML = `<button class="zu" type="button">✕</button><div class="empty"><b>Konnte nicht laden</b>${esc(fehlerText(x))}</div>`; $(".zu", p).onclick = schliessen; return; }
     if (!F().sheet.contains(p)) return;
     d.bewertungen = []; d.id = "vorschau";
-    p.innerHTML = `<button class="zu" type="button" aria-label="Schließen">✕</button>${opt.bleiben ? zurueckKnopf() : ""}${detailHTML(d, false)}`; $(".zu", p).onclick = schliessen; trailerBinden(d); personenBinden(p);
+    p.innerHTML = `<button class="zu" type="button" aria-label="Schließen">✕</button>${opt.bleiben ? zurueckKnopf() : ""}${detailHTML(d, false)}`; $(".zu", p).onclick = schliessen; trailerBinden(d); personenBinden(p); F().angeboteLaden($("#s-angebote", p), d, "serie");
     if (opt.bleiben) $("#s-zurueck", p).onclick = sucheOeffnen;
     $("#s-aktionen", p).innerHTML = `<div class="status-reihe">${STATUS.map(x => `<button class="btn${x[0] === "watchlist" ? " primary" : ""}" data-add="${x[0]}" type="button">${x[0] === "watchlist" ? "+ Watchlist" : x[1]}</button>`).join("")}</div>`;
     p.querySelectorAll("[data-add]").forEach(b => b.onclick = () => hinzufuegen(tmdb_id, b.dataset.add, b, opt));
@@ -222,7 +222,7 @@ window.Serien = (function () {
         ${(d.staffeln || []).length ? `<h3>Staffeln & Folgen</h3><div id="staffeln">${(d.staffeln || []).map(st => staffelHTML(d, st, gespeichert)).join("")}</div>` : ""}
         ${(d.schauspieler || []).length ? `<h3>Besetzung</h3><div class="personen">${d.schauspieler.map(p => personHTML(p, p.rolle)).join("")}</div>` : ""}
         ${macher ? `<h3>Hinter der Kamera</h3>${macher}` : ""}
-        <h3>Wo schauen</h3>${anbieterHTML(d.anbieter)}
+        <h3>Wo schauen</h3><div id="s-angebote"></div>
         <div id="s-unten"></div>
       </div>`;
   }
@@ -304,7 +304,7 @@ window.Serien = (function () {
   }
   function oeffneSerie(s, opt = {}) {
     const { panel, $, esc, datum, nameVon, toast, trailerBinden, personenBinden, S } = F();
-    const p = panel(`${opt.bleiben ? zurueckKnopf() : ""}${detailHTML(s, true)}`); trailerBinden(s); personenBinden(p);
+    const p = panel(`${opt.bleiben ? zurueckKnopf() : ""}${detailHTML(s, true)}`); trailerBinden(s); personenBinden(p); F().angeboteLaden($("#s-angebote", p), s, "serie");
     if (opt.bleiben) $("#s-zurueck", p).onclick = sucheOeffnen;
     const scrollMerken = p.scrollTop;
     // Status
