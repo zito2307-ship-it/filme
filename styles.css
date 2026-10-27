@@ -301,3 +301,4 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .folge-rater .andere b { color: var(--akzent); }
 .rang-zeile .plakat.breit { width: 72px; aspect-ratio: 16/9; }
 .status-serie .btn { padding: 10px 8px; font-size: 14px; }
+.heat-zelle.top { box-shadow: 0 0 10px rgba(56,189,248,.55); color: #082F49; text-shadow: none; }

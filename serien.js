@@ -104,21 +104,41 @@ window.Serien = (function () {
     catch (x) { el.innerHTML = `<div class="empty"><b>Suche fehlgeschlagen</b>${esc(fehlerText(x))}</div>`; return; }
     zeigeErgebnisse(p);
   }
-  function zeigeErgebnisse(p) {
-    const { $, S, esc, bild } = F();
-    const el = $("#s-inhalt", p); if (!el) return;
-    const zeile = r => {
-      const drin = (S.serien || []).find(x => x.tmdb_id === r.tmdb_id);
-      return `<div class="zeile" data-tmdb="${r.tmdb_id}"><div class="offen" role="button" tabindex="0"><div class="plakat">${r.poster ? `<img src="${bild(r.poster, "w185")}" alt="" loading="lazy">` : `<div class="ohne">${esc(r.titel)}</div>`}</div>
-        <div class="inhalt"><h3>${esc(r.titel)}</h3><div class="u">${[r.jahr, (r.genres || []).slice(0, 2).join(", "), r.tmdb_rating ? "TMDB " + r.tmdb_rating : null].filter(Boolean).map(esc).join(" · ")}</div><p>${esc(r.beschreibung)}</p>
-        <div class="aktionen">${drin ? `<span class="ok">✓ ${statusText(drin.status)}</span>` : STATUS.map(x => `<button class="btn klein${x[0] === "watchlist" ? " primary" : ""}" data-add="${x[0]}" type="button">${x[0] === "watchlist" ? "+ Watchlist" : x[1]}</button>`).join("")}</div></div></div></div>`;
-    };
-    el.innerHTML = Z.ergebnisse.length ? `<div class="liste">${Z.ergebnisse.map(zeile).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>Vielleicht den Originaltitel probieren.</div>`;
-    el.querySelectorAll(".zeile").forEach(z => {
-      const id = parseInt(z.dataset.tmdb);
+  function zeileHTML(r) {
+    const { S, esc, bild } = F();
+    const drin = (S.serien || []).find(x => x.tmdb_id === r.tmdb_id);
+    const u = [r.jahr, r.rolle || null, (r.genres || []).slice(0, 2).join(", "), r.tmdb_rating ? "TMDB " + r.tmdb_rating : null].filter(Boolean).map(esc).join(" · ");
+    return `<div class="zeile" data-stmdb="${r.tmdb_id}"><div class="offen" role="button" tabindex="0"><div class="plakat">${r.poster ? `<img src="${bild(r.poster, "w185")}" alt="" loading="lazy">` : `<div class="ohne">${esc(r.titel)}</div>`}</div>
+      <div class="inhalt">${r.wegen && r.wegen.length ? `<div class="wegen">Weil ihr „${esc(r.wegen[0])}“ mögt</div>` : ""}<h3>${esc(r.titel)}</h3><div class="u">${u}</div><p>${esc(r.beschreibung)}</p>
+      <div class="aktionen">${drin ? `<span class="ok">✓ ${statusText(drin.status)}</span>` : STATUS.map(x => `<button class="btn klein${x[0] === "watchlist" ? " primary" : ""}" data-add="${x[0]}" type="button">${x[0] === "watchlist" ? "+ Watchlist" : x[1]}</button>`).join("")}</div></div></div></div>`;
+  }
+  function zeilenBinden(el) {
+    const { $, S } = F();
+    el.querySelectorAll(".zeile[data-stmdb]").forEach(z => {
+      const id = parseInt(z.dataset.stmdb);
       z.querySelectorAll("[data-add]").forEach(b => b.onclick = ev => { ev.stopPropagation(); hinzufuegen(id, b.dataset.add, b); });
       $(".offen", z).onclick = ev => { if (ev.target.closest("[data-add]")) return; const drin = (S.serien || []).find(x => x.tmdb_id === id); if (drin) oeffneSerie(drin); else vorschau(id); };
     });
+  }
+  function zeigeErgebnisse(p) {
+    const { $ } = F();
+    const el = $("#s-inhalt", p); if (!el) return;
+    el.innerHTML = Z.ergebnisse.length ? `<div class="liste">${Z.ergebnisse.map(zeileHTML).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>Vielleicht den Originaltitel probieren.</div>`;
+    zeilenBinden(el);
+  }
+  // Saatgut für Serien-Empfehlungen: wie bei Filmen, Gewicht nach eurer Gesamtwertung
+  function seeds(basis) {
+    const { S } = F(); const out = [];
+    for (const s of S.serien || []) {
+      const meine = bew(s, S.user.id);
+      if (basis === "gemeinsam" && !gemeinsam(s)) continue;
+      if (basis === "meine" && !(meine || s.hinzugefuegt_von === S.user.id)) continue;
+      const w = basis === "meine" && meine ? meine.punkte : schnitt(s); let gewicht;
+      if (s.status === "watchlist") gewicht = 0.8;
+      else if (w == null) gewicht = 1.2; else if (w >= 8) gewicht = 3; else if (w >= 6) gewicht = 1.5; else continue;
+      out.push({ tmdb_id: s.tmdb_id, gewicht, titel: s.titel });
+    }
+    return out;
   }
   async function hinzufuegen(tmdb_id, status, btn) {
     const { S, toast, fehlerText, schliessen, heute } = F();
@@ -129,8 +149,9 @@ window.Serien = (function () {
       const neu = await Store.serieAnlegen({ ...serie, status, hinzugefuegt_von: S.user.id });
       neu.bewertungen = []; S.serien.unshift(neu);
       toast(status === "watchlist" ? "Auf die Serien-Watchlist gesetzt" : status === "laufend" ? "Als „Dabei“ eingetragen" : "Als „Durch“ eingetragen");
-      Z.ansicht = status; schliessen(); render();
-      if (status !== "watchlist") oeffneSerie(neu);
+      S.empfVeraltet = true;
+      if (S.tab === "serien") { Z.ansicht = status; schliessen(); render(); if (status !== "watchlist") oeffneSerie(neu); }
+      else { F().render(); if (document.querySelector("#sheet .panel")) { schliessen(); } }
     } catch (x) { toast(fehlerText(x)); if (btn) { btn.disabled = false; btn.textContent = statusText(status); } }
   }
   async function vorschau(tmdb_id) {
@@ -173,12 +194,16 @@ window.Serien = (function () {
       </div>`;
   }
   // Heatmap wie bei seriesgraph: Zeilen = Staffeln, Zellen = Folgen, Farbe = Wertung
-  function heatFarbe(r) { if (r == null) return "var(--bg3)"; const t = Math.max(0, Math.min(1, (r - 5) / 4.2)); return `hsl(${Math.round(t * 120)} 58% ${Math.round(34 + t * 8)}%)`; }
+  // Farbstufen: <6 rot, 6–7 orange, 7–8 gelb, 8–9 grün, ab 9 strahlendes Hellblau
+  function heatFarbe(r) {
+    if (r == null) return "var(--bg3)";
+    if (r >= 9) return "#38BDF8"; if (r >= 8) return "#3FAE5A"; if (r >= 7) return "#C9B52E"; if (r >= 6) return "#E08A2E"; if (r >= 5) return "#D9532B"; return "#A8322A";
+  }
   function heatHTML(d) {
     const { esc, pkt } = F();
     const maxF = Math.max(1, ...(d.staffeln || []).map(st => (st.folgen || []).length));
     const wert = (st, f) => Z.heat === "tmdb" ? ((f.stimmen || 0) >= 1 ? f.tmdb_rating : null) : schnitt(d, st.nr, f.nr);
-    const zeilen = (d.staffeln || []).map(st => `<div class="heat-zeile"><span class="heat-label">S${st.nr}</span>${(st.folgen || []).map(f => { const w = wert(st, f); const zukunft = f.datum && f.datum > new Date().toISOString().slice(0, 10); return `<button class="heat-zelle${zukunft ? " zukunft" : ""}" type="button" data-st="${st.nr}" data-fo="${f.nr}" style="background:${heatFarbe(w)}" title="S${st.nr}E${f.nr} ${esc(f.titel || "")}${w != null ? " – " + pkt(w) : ""}">${w != null ? pkt(w) : ""}</button>`; }).join("")}</div>`).join("");
+    const zeilen = (d.staffeln || []).map(st => `<div class="heat-zeile"><span class="heat-label">S${st.nr}</span>${(st.folgen || []).map(f => { const w = wert(st, f); const zukunft = f.datum && f.datum > new Date().toISOString().slice(0, 10); return `<button class="heat-zelle${zukunft ? " zukunft" : ""}${w != null && w >= 9 ? " top" : ""}" type="button" data-st="${st.nr}" data-fo="${f.nr}" style="background:${heatFarbe(w)}" title="S${st.nr}E${f.nr} ${esc(f.titel || "")}${w != null ? " – " + pkt(w) : ""}">${w != null ? pkt(w) : ""}</button>`; }).join("")}</div>`).join("");
     return `<div class="heat-kopf"><div class="umschalter klein"><button data-h="tmdb" aria-pressed="${Z.heat === "tmdb"}" type="button">TMDB</button><button data-h="uns" aria-pressed="${Z.heat === "uns"}" type="button">Unsere</button></div><small>${maxF > 1 ? "Antippen öffnet die Folge" : ""}</small></div>
       <div class="heat" style="--n:${maxF}">${zeilen}</div>`;
   }
@@ -314,5 +339,5 @@ window.Serien = (function () {
     raterBinden(r, s, st, fo, () => { Z.offen[s.id].add(st); nach && nach(); setTimeout(() => { const nf = document.getElementById(`folge-${st}-${fo}`); if (nf) { nf.scrollIntoView({ block: "center" }); folgeOeffnen(nf, s, st, fo, nach); } }, 0); });
   }
 
-  return { render, oeffneSerie, gemeinsam };
+  return { render, oeffneSerie, gemeinsam, seeds, zeileHTML, zeilenBinden };
 })();

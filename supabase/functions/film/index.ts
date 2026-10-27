@@ -80,7 +80,7 @@ async function personenSuche(q: string, key: string) {
 async function personFilme(id: number | null, name: string | null, key: string) {
   if (!id && name) { const l = await personenSuche(name, key); if (!l.length) return null; id = l[0].id; }
   if (!id) return null;
-  const [p, c] = await Promise.all([tmdb(`/person/${id}`, { language: "de-DE" }, key), tmdb(`/person/${id}/movie_credits`, { language: "de-DE" }, key)]);
+  const [p, c, tv] = await Promise.all([tmdb(`/person/${id}`, { language: "de-DE" }, key), tmdb(`/person/${id}/movie_credits`, { language: "de-DE" }, key), tmdb(`/person/${id}/tv_credits`, { language: "de-DE" }, key).catch(() => ({ cast: [], crew: [] }))]);
   const rollen = new Map<number, { film: any; rollen: string[] }>();
   const merk = (m: any, rolle: string) => { if (!m || !m.id || !m.title) return; const e = rollen.get(m.id) || { film: m, rollen: [] }; if (rolle && !e.rollen.includes(rolle)) e.rollen.push(rolle); rollen.set(m.id, e); };
   for (const m of c.cast || []) merk(m, m.character ? "als " + m.character : "Schauspiel");
@@ -88,9 +88,19 @@ async function personFilme(id: number | null, name: string | null, key: string) 
   const liste = [...rollen.values()].filter(e => (e.film.vote_count || 0) >= 5 || e.film.poster_path)
     .sort((a, b) => (b.film.popularity || 0) - (a.film.popularity || 0)).slice(0, 80);
   const filme = await kompakt(liste.map(e => e.film), key);
+  // Serien: Gastauftritte (1 Folge), Talkshows, Nachrichten und Reality rausfiltern
+  const selbst = /^(self|himself|herself|sich selbst|er selbst|sie selbst)/i;
+  const tvRollen = new Map<number, { serie: any; rollen: string[] }>();
+  const merkTV = (m: any, rolle: string) => { if (!m || !m.id || !m.name) return; if ((m.genre_ids || []).some((g: number) => [10767, 10763, 10764].includes(g))) return; const e = tvRollen.get(m.id) || { serie: m, rollen: [] }; if (rolle && !e.rollen.includes(rolle)) e.rollen.push(rolle); tvRollen.set(m.id, e); };
+  for (const m of tv.cast || []) if ((m.episode_count || 0) >= 2 && !selbst.test(m.character || "")) merkTV(m, m.character ? "als " + m.character : "Schauspiel");
+  for (const m of tv.crew || []) if (JOB[m.job] || m.job === "Creator") merkTV(m, m.job === "Creator" ? "Idee" : JOB[m.job]);
+  const tvListe = [...tvRollen.values()].filter(e => (e.serie.vote_count || 0) >= 5 || e.serie.poster_path)
+    .sort((a, b) => (b.serie.popularity || 0) - (a.serie.popularity || 0)).slice(0, 40);
+  const serien = await kompaktTV(tvListe.map(e => e.serie), key);
   return {
-    person: { id: p.id, name: p.name, bild: p.profile_path || null, abteilung: ABTEILUNG[p.known_for_department] || p.known_for_department || "", geboren: p.birthday || null, ort: p.place_of_birth || null, anzahl: liste.length },
+    person: { id: p.id, name: p.name, bild: p.profile_path || null, abteilung: ABTEILUNG[p.known_for_department] || p.known_for_department || "", geboren: p.birthday || null, ort: p.place_of_birth || null, anzahl: liste.length, anzahl_serien: tvListe.length },
     filme: filme.map((f, i) => ({ ...f, rolle: liste[i].rollen.slice(0, 2).join(", "), popularitaet: liste[i].film.popularity || 0 })),
+    serien: serien.map((s, i) => ({ ...s, rolle: tvListe[i].rollen.slice(0, 2).join(", "), popularitaet: tvListe[i].serie.popularity || 0 })),
   };
 }
 
@@ -155,6 +165,26 @@ async function serieDetails(id: number, k: Schluessel) {
     anzahl_staffeln: staffeln.length, anzahl_folgen: alleFolgen.length,
     omdb_aktiv: !!k.omdb,
   };
+}
+
+async function empfehlungenTV(seeds: { tmdb_id: number; gewicht: number; titel: string }[], ausschluss: number[], key: string) {
+  const top = [...seeds].sort((a, b) => b.gewicht - a.gewicht).slice(0, 12);
+  const raus = new Set(ausschluss);
+  const punkte = new Map<number, { serie: any; score: number; wegen: Map<string, number> }>();
+  const listen = await Promise.all(top.map(s => tmdb(`/tv/${s.tmdb_id}/recommendations`, { language: "de-DE", page: "1" }, key).catch(() => ({ results: [] }))));
+  listen.forEach((l, i) => {
+    const s = top[i];
+    (l.results || []).forEach((m: any, pos: number) => {
+      if (raus.has(m.id) || !m.poster_path || (m.vote_count || 0) < 30) return;
+      const beitrag = s.gewicht * (1 / (1 + pos * 0.12)) * ((m.vote_average || 0) >= 6.5 ? 1 : 0.5);
+      const e = punkte.get(m.id) || { serie: m, score: 0, wegen: new Map() };
+      e.score += beitrag; e.wegen.set(s.titel, (e.wegen.get(s.titel) || 0) + beitrag);
+      punkte.set(m.id, e);
+    });
+  });
+  const sortiert = [...punkte.values()].sort((a, b) => b.score - a.score).slice(0, 40);
+  const serien = await kompaktTV(sortiert.map(e => e.serie), key);
+  return serien.map((s, i) => ({ ...s, wegen: [...sortiert[i].wegen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]) }));
 }
 
 async function omdb(imdbId: string, key: string) {
@@ -306,6 +336,15 @@ Deno.serve(async (req: Request) => {
         const q = String(body.query || "").trim();
         if (!q) return antwort({ serien: [] });
         const d = await tmdb("/search/tv", { query: q, language: "de-DE", include_adult: "false", page: "1" }, k.tmdb);
+        return antwort({ serien: await kompaktTV(d.results || [], k.tmdb) });
+      }
+      case "serie_empfehlungen": {
+        const seeds = Array.isArray(body.seeds) ? body.seeds : [];
+        if (!seeds.length) return antwort({ serien: [] });
+        return antwort({ serien: await empfehlungenTV(seeds, Array.isArray(body.ausschluss) ? body.ausschluss : [], k.tmdb) });
+      }
+      case "serie_beliebt": {
+        const d = await tmdb("/tv/popular", { language: "de-DE", page: "1" }, k.tmdb);
         return antwort({ serien: await kompaktTV(d.results || [], k.tmdb) });
       }
       case "serie_details": {

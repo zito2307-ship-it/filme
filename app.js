@@ -6,7 +6,7 @@
   const S = { session: null, user: null, profile: [], filme: [], serien: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
     genre: { watchlist: null, gesehen: null, zufall: new Set(), fuerdich: null }, sort: { watchlist: "neu", gesehen: "neu" },
     suche: "", ergebnisse: null, personen: null, person: null, personSort: "beliebt", beliebt: null, empfCache: {}, empfVeraltet: false, empfBasis: "alle",
-    ansicht: "raster", rang: { wer: "beide", nur: "alle" },
+    ansicht: "raster", rang: { wer: "beide", nur: "alle" }, empfArt: "filme", personArt: "filme",
     zufall: { quelle: "watchlist", max: 0, ergebnis: null, dreht: false, ton: localStorage.getItem("filmabend-ton") !== "aus" } };
 
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -291,37 +291,49 @@
     return out;
   }
   async function renderFuerDich() {
-    const basen = [["alle", "Alle unsere Filme"], ["gemeinsam", "Gemeinsam geschaut"], ["meine", "Nur meine"]];
-    const basisChips = S.filme.length ? `<div class="chips">${basen.map(b => `<button class="chip" data-b="${b[0]}" aria-pressed="${S.empfBasis === b[0]}">${b[1]}</button>`).join("")}</div>` : "";
-    view.innerHTML = `<div class="kopf mit-knopf"><div><h1>Für uns</h1><p>Vorschläge auf Basis eurer Filme und Bewertungen.</p></div>
+    const basen = [["alle", "Alle unsere " + (S.empfArt === "serien" ? "Serien" : "Filme")], ["gemeinsam", "Gemeinsam geschaut"], ["meine", "Nur meine"]];
+    const art = S.empfArt, serien = art === "serien";
+    const quelleLeer = serien ? !(S.serien || []).length : !S.filme.length;
+    const basisChips = quelleLeer ? "" : `<div class="chips">${basen.map(b => `<button class="chip" data-b="${b[0]}" aria-pressed="${S.empfBasis === b[0]}">${b[1]}</button>`).join("")}</div>`;
+    view.innerHTML = `<div class="kopf mit-knopf"><div><h1>Für uns</h1><p>Vorschläge auf Basis eurer ${serien ? "Serien" : "Filme"} und Bewertungen.</p></div>
         <button class="btn klein${S.empfVeraltet ? " primary" : ""}" id="neu-laden" type="button" title="Vorschläge neu berechnen">↻ ${S.empfVeraltet ? "Neue Vorschläge" : "Neu laden"}</button></div>
-      ${schluesselHinweis()}${basisChips}<div id="inhalt"><div class="empty"><span class="lade"></span></div></div>`;
+      ${schluesselHinweis()}
+      <div class="umschalter"><button data-art="filme" aria-pressed="${!serien}" type="button">Filme</button><button data-art="serien" aria-pressed="${serien}" type="button">Serien</button></div>
+      ${basisChips}<div id="inhalt"><div class="empty"><span class="lade"></span></div></div>`;
     hinweisBinden();
+    view.querySelectorAll(".umschalter [data-art]").forEach(b => b.onclick = () => { S.empfArt = b.dataset.art; renderFuerDich(); });
     view.querySelectorAll(".chip[data-b]").forEach(c => c.onclick = () => { S.empfBasis = c.dataset.b; renderFuerDich(); });
     $("#neu-laden").onclick = () => { S.empfCache = {}; S.empfVeraltet = false; renderFuerDich(); };
     if (!S.keys.tmdb) { $("#inhalt").innerHTML = ""; return; }
-    const basis = S.empfBasis;
+    const basis = S.empfBasis, key = art + ":" + basis;
     try {
-      if (!S.empfCache[basis]) {
-        const sd = seeds(basis);
-        const r = sd.length ? await Store.film("empfehlungen", { seeds: sd, ausschluss: S.filme.map(f => f.tmdb_id) }) : (basis === "alle" ? await Store.film("beliebt") : { filme: [] });
-        const vorhanden = new Set(S.filme.map(f => f.tmdb_id));
-        S.empfCache[basis] = { quelle: sd.length ? "eure" : "beliebt", filme: (r.filme || []).filter(f => !vorhanden.has(f.tmdb_id)) };
+      if (!S.empfCache[key]) {
+        const sd = serien ? window.Serien.seeds(basis) : seeds(basis);
+        let liste = [];
+        if (serien) {
+          const r = sd.length ? await Store.film("serie_empfehlungen", { seeds: sd, ausschluss: (S.serien || []).map(s => s.tmdb_id) }) : (basis === "alle" ? await Store.film("serie_beliebt") : { serien: [] });
+          const vorhanden = new Set((S.serien || []).map(s => s.tmdb_id)); liste = (r.serien || []).filter(x => !vorhanden.has(x.tmdb_id));
+        } else {
+          const r = sd.length ? await Store.film("empfehlungen", { seeds: sd, ausschluss: S.filme.map(f => f.tmdb_id) }) : (basis === "alle" ? await Store.film("beliebt") : { filme: [] });
+          const vorhanden = new Set(S.filme.map(f => f.tmdb_id)); liste = (r.filme || []).filter(x => !vorhanden.has(x.tmdb_id));
+        }
+        S.empfCache[key] = { quelle: sd.length ? "eure" : "beliebt", filme: liste };
       }
     } catch (x) { $("#inhalt").innerHTML = `<div class="empty"><b>Keine Vorschläge</b>${esc(fehlerText(x))}</div>`; return; }
-    if (S.tab !== "fuerdich" || S.empfBasis !== basis) return;
-    const E = S.empfCache[basis];
-    // Die Liste bleibt stehen, bis man „Neu laden“ drückt – frisch eingetragene Filme werden nur als ✓ markiert.
+    if (S.tab !== "fuerdich" || S.empfArt + ":" + S.empfBasis !== key) return;
+    const E = S.empfCache[key];
+    // Die Liste bleibt stehen, bis man „Neu laden“ drückt – frisch eingetragene Titel werden nur als ✓ markiert.
     const alle = E.filme;
     const genres = genresVon(alle); const g = S.genre.fuerdich && genres.includes(S.genre.fuerdich) ? S.genre.fuerdich : null;
     const liste = g ? alle.filter(f => f.genres.includes(g)) : alle;
-    const leer = basis === "gemeinsam" ? "Markiert bei der Bewertung, mit wem ihr geschaut habt – dann gibt es hier Vorschläge auf Basis eurer gemeinsamen Filme."
-      : basis === "meine" ? "Bewerte ein paar Filme, dann gibt es Vorschläge nur für dich." : "Bewertet ein paar Filme, dann gibt es Vorschläge.";
-    $("#inhalt").innerHTML = `${E.quelle === "beliebt" ? `<div class="hinweis">Ihr habt noch keine Filme eingetragen – darum erst mal, was gerade beliebt ist. Sobald ihr Filme bewertet, wird es persönlich.</div>` : ""}
+    const was = serien ? "Serien" : "Filme";
+    const leer = basis === "gemeinsam" ? `Markiert bei der Bewertung, mit wem ihr geschaut habt – dann gibt es hier Vorschläge auf Basis eurer gemeinsamen ${was}.`
+      : basis === "meine" ? `Bewerte ein paar ${was}, dann gibt es Vorschläge nur für dich.` : `Bewertet ein paar ${was}, dann gibt es Vorschläge.`;
+    $("#inhalt").innerHTML = `${E.quelle === "beliebt" ? `<div class="hinweis">Ihr habt noch keine ${was} eingetragen – darum erst mal, was gerade beliebt ist. Sobald ihr ${was} bewertet, wird es persönlich.</div>` : ""}
       ${genres.length > 1 ? `<div class="chips"><button class="chip" data-g="" aria-pressed="${!g}">Alle</button>${genres.map(x => `<button class="chip" data-g="${esc(x)}" aria-pressed="${g === x}">${esc(x)}</button>`).join("")}</div>` : ""}
-      ${liste.length ? `<div class="liste">${liste.map(zeile).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>${leer}</div>`}`;
+      ${liste.length ? `<div class="liste">${liste.map(serien ? window.Serien.zeileHTML : zeile).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>${leer}</div>`}`;
     view.querySelectorAll(".chip[data-g]").forEach(c => c.onclick = () => { S.genre.fuerdich = c.dataset.g || null; renderFuerDich(); });
-    zeilenBinden(alle);
+    if (serien) window.Serien.zeilenBinden($("#inhalt")); else zeilenBinden(alle);
   }
   function zeile(f) {
     const drin = S.filme.find(x => x.tmdb_id === f.tmdb_id);
@@ -393,14 +405,19 @@
       if (S.person !== P || S.tab !== "suche") return;
       view.querySelector(".person-kopf").outerHTML = kopf(P.daten.person);
     }
-    const filme = [...P.daten.filme];
-    if (S.personSort === "neu") filme.sort((a, b) => (b.jahr || 0) - (a.jahr || 0));
-    else if (S.personSort === "wertung") filme.sort((a, b) => ((b.stimmen || 0) >= 50 ? b.tmdb_rating || 0 : 0) - ((a.stimmen || 0) >= 50 ? a.tmdb_rating || 0 : 0));
+    const serienDa = (P.daten.serien || []).length, filmeDa = (P.daten.filme || []).length;
+    if (S.personArt === "serien" && !serienDa) S.personArt = "filme";
+    const serien = S.personArt === "serien";
+    const liste = [...(serien ? P.daten.serien : P.daten.filme)];
+    if (S.personSort === "neu") liste.sort((a, b) => (b.jahr || 0) - (a.jahr || 0));
+    else if (S.personSort === "wertung") liste.sort((a, b) => ((b.stimmen || 0) >= 50 ? b.tmdb_rating || 0 : 0) - ((a.stimmen || 0) >= 50 ? a.tmdb_rating || 0 : 0));
     const opts = [["beliebt", "Bekannteste zuerst"], ["neu", "Neueste zuerst"], ["wertung", "Beste Wertung"]];
-    $("#inhalt").innerHTML = `<div class="werkzeug"><span>${filme.length} Filme</span><select id="psort">${opts.map(o => `<option value="${o[0]}" ${S.personSort === o[0] ? "selected" : ""}>${o[1]}</option>`).join("")}</select></div>
-      ${filme.length ? `<div class="liste">${filme.map(zeile).join("")}</div>` : `<div class="empty"><b>Keine Filme gefunden</b></div>`}`;
+    $("#inhalt").innerHTML = `${serienDa ? `<div class="umschalter"><button data-art="filme" aria-pressed="${!serien}" type="button">Filme (${filmeDa})</button><button data-art="serien" aria-pressed="${serien}" type="button">Serien (${serienDa})</button></div>` : ""}
+      <div class="werkzeug"><span>${liste.length} ${serien ? "Serien" : "Filme"}</span><select id="psort">${opts.map(o => `<option value="${o[0]}" ${S.personSort === o[0] ? "selected" : ""}>${o[1]}</option>`).join("")}</select></div>
+      ${liste.length ? `<div class="liste">${liste.map(serien ? window.Serien.zeileHTML : zeile).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b></div>`}`;
+    $("#inhalt").querySelectorAll(".umschalter [data-art]").forEach(b => b.onclick = () => { S.personArt = b.dataset.art; renderPerson(); });
     $("#psort").onchange = ev => { S.personSort = ev.target.value; renderPerson(); };
-    zeilenBinden(filme);
+    if (serien) window.Serien.zeilenBinden($("#inhalt")); else zeilenBinden(liste);
   }
   function fehlerText(x) {
     const c = x.code || x.message || "";
