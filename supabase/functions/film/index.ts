@@ -1,6 +1,6 @@
 // Filmabend – Edge Function "film"
 // Holt Filmdaten von TMDB (Suche, Details, Besetzung, Trailer, Anbieter, Empfehlungen)
-// und IMDb-/Rotten-Tomatoes-Wertungen von OMDb. Die API-Schlüssel liegen in der
+// IMDb-/Rotten-Tomatoes-Wertungen von OMDb und die Letterboxd-Wertung von der öffentlichen Filmseite. Die API-Schlüssel liegen in der
 // Tabelle "einstellungen" (nur per Service Role lesbar) oder als Secrets TMDB_KEY / OMDB_KEY.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -77,6 +77,27 @@ async function omdb(imdbId: string, key: string) {
   } catch { return {}; }
 }
 
+// Letterboxd hat keine öffentliche API. Die Filmseite (erreichbar über die TMDB-ID) enthält
+// die Durchschnittswertung (0,5–5) als strukturierte Daten (schema.org AggregateRating).
+async function letterboxd(tmdbId: number) {
+  const leer = { lb_rating: null, lb_stimmen: null, lb_url: null };
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 6000);
+    const r = await fetch(`https://letterboxd.com/tmdb/${tmdbId}/`, { redirect: "follow", signal: ctl.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (Filmabend, private Watchlist)", "Accept": "text/html" } });
+    clearTimeout(t);
+    if (!r.ok || !/\/film\//.test(r.url)) return leer;
+    const html = await r.text();
+    const m = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    if (!m) return { ...leer, lb_url: r.url };
+    const json = m[1].replace(/\/\*\s*<!\[CDATA\[\s*\*\//, "").replace(/\/\*\s*\]\]>\s*\*\//, "").trim();
+    const d = JSON.parse(json);
+    const a = d.aggregateRating || {};
+    const wert = parseFloat(a.ratingValue);
+    return { lb_rating: isNaN(wert) ? null : Math.round(wert * 100) / 100, lb_stimmen: parseInt(a.ratingCount) || null, lb_url: d.url || r.url };
+  } catch { return leer; }
+}
+
 async function details(tmdbId: number, k: Schluessel) {
   const d = await tmdb(`/movie/${tmdbId}`, {
     language: "de-DE",
@@ -115,7 +136,7 @@ async function details(tmdbId: number, k: Schluessel) {
   const bilder = [d.backdrop_path, ...backs].filter(Boolean).slice(0, 10);
 
   const imdbId = d.imdb_id || d.external_ids?.imdb_id || null;
-  const wertungen = imdbId && k.omdb ? await omdb(imdbId, k.omdb) : {};
+  const [wertungen, lb] = await Promise.all([imdbId && k.omdb ? omdb(imdbId, k.omdb) : Promise.resolve({}), letterboxd(tmdbId)]);
 
   return {
     tmdb_id: d.id,
@@ -132,6 +153,7 @@ async function details(tmdbId: number, k: Schluessel) {
     tmdb_rating: d.vote_average ? Math.round(d.vote_average * 10) / 10 : null,
     imdb_rating: null, rt_rating: null, metascore: null,
     ...wertungen,
+    ...lb,
     trailer,
     schauspieler: cast,
     regie, drehbuch, produzenten,
@@ -169,6 +191,10 @@ Deno.serve(async (req: Request) => {
 
   let body: any = {};
   try { body = await req.json(); } catch { return antwort({ fehler: "ungueltige anfrage" }, 400); }
+  if (body.aktion === "letterboxd") { // nur Letterboxd-Wertung, braucht keinen TMDB-Schlüssel
+    const id = parseInt(body.tmdb_id);
+    return id ? antwort(await letterboxd(id)) : antwort({ fehler: "tmdb_id fehlt" }, 400);
+  }
   const k = await schluessel();
   if (!k.tmdb) return antwort({ fehler: "tmdb_fehlt" }, 400);
 

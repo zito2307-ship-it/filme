@@ -127,7 +127,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .wertung { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; min-width: 76px; }
 .wertung small { display: block; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg3); font-weight: 700; }
 .wertung b { font-size: 18px; }
-.wertung.imdb b { color: #F5C518; } .wertung.rt b { color: #FA320A; } .wertung.meta b { color: var(--gruen); }
+.wertung.imdb b { color: #F5C518; } .wertung.rt b { color: #FA320A; } .wertung.meta b { color: var(--gruen); } .wertung.lb b { color: #00C853; }
 .detail h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg3); margin: 20px 0 10px; }
 .detail p.text { margin: 0; color: var(--fg2); font-size: 15px; line-height: 1.55; }
 .personen { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none; }

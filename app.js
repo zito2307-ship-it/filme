@@ -86,6 +86,7 @@
     const l = [...filme];
     if (art === "titel") l.sort((a, b) => a.titel.localeCompare(b.titel, "de"));
     else if (art === "imdb") l.sort((a, b) => (b.imdb_rating || 0) - (a.imdb_rating || 0));
+    else if (art === "letterboxd") l.sort((a, b) => (b.lb_rating || 0) - (a.lb_rating || 0));
     else if (art === "jahr") l.sort((a, b) => (b.jahr || 0) - (a.jahr || 0));
     else if (art === "wertung") l.sort((a, b) => (schnitt(b) || 0) - (schnitt(a) || 0));
     else if (art === "gesehen") l.sort((a, b) => (b.gesehen_am || "").localeCompare(a.gesehen_am || ""));
@@ -108,8 +109,8 @@
     const g = S.genre[status] && genres.includes(S.genre[status]) ? S.genre[status] : (S.genre[status] = null);
     const liste = sortiere(g ? alle.filter(f => f.genres.includes(g)) : alle, S.sort[status]);
     const titel = status === "watchlist" ? "Watchlist" : "Gesehen";
-    const sortOpts = status === "watchlist" ? [["neu", "Zuletzt eingetragen"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["jahr", "Jahr"]]
-      : [["gesehen", "Zuletzt gesehen"], ["wertung", "Unsere Wertung"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["jahr", "Jahr"]];
+    const sortOpts = status === "watchlist" ? [["neu", "Zuletzt eingetragen"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]]
+      : [["gesehen", "Zuletzt gesehen"], ["wertung", "Unsere Wertung"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]];
     if (!S.sort[status] || !sortOpts.some(o => o[0] === S.sort[status])) S.sort[status] = sortOpts[0][0];
     view.innerHTML = `<div class="kopf"><h1>${titel}</h1><p>${alle.length} ${alle.length === 1 ? "Film" : "Filme"}${status === "watchlist" ? " zum Schauen" : ""}</p></div>
       ${schluesselHinweis()}
@@ -317,6 +318,7 @@
     const w = [];
     if (d.imdb_rating) w.push(`<div class="wertung imdb"><small>IMDb</small><b>${d.imdb_rating}</b><span style="color:var(--fg3);font-size:12px">/10</span></div>`);
     if (d.rt_rating != null) w.push(`<div class="wertung rt"><small>Rotten T.</small><b>${d.rt_rating}%</b></div>`);
+    if (d.lb_rating) w.push(`<div class="wertung lb"><small>Letterboxd</small><b>${pkt(d.lb_rating)}</b><span style="color:var(--fg3);font-size:12px">/5</span></div>`);
     if (d.metascore != null) w.push(`<div class="wertung meta"><small>Metacritic</small><b>${d.metascore}</b></div>`);
     if (d.tmdb_rating) w.push(`<div class="wertung"><small>TMDB</small><b>${d.tmdb_rating}</b></div>`);
     const crew = [["Regie", d.regie], ["Drehbuch", d.drehbuch], ["Produktion", d.produzenten]].filter(x => (x[1] || []).length)
@@ -359,7 +361,7 @@
     if ($("#watchlist", p)) $("#watchlist", p).onclick = () => statusSetzen(f, "watchlist");
     if ($("#gesehen_am", p)) $("#gesehen_am", p).onchange = ev => gesehenAm(f, ev.target.value);
     bewertungBinden(f, p);
-    $("#unten", p).innerHTML = `<div class="meta-zeile">Eingetragen${f.hinzugefuegt_von ? " von " + esc(nameVon(f.hinzugefuegt_von)) : ""} am ${datum(f.erstellt_am)}${f.imdb_id ? ` · <a href="https://www.imdb.com/title/${esc(f.imdb_id)}/" target="_blank" rel="noopener">IMDb öffnen</a>` : ""}</div>
+    $("#unten", p).innerHTML = `<div class="meta-zeile">Eingetragen${f.hinzugefuegt_von ? " von " + esc(nameVon(f.hinzugefuegt_von)) : ""} am ${datum(f.erstellt_am)}${f.imdb_id ? ` · <a href="https://www.imdb.com/title/${esc(f.imdb_id)}/" target="_blank" rel="noopener">IMDb</a>` : ""}${f.lb_url ? ` · <a href="${esc(f.lb_url)}" target="_blank" rel="noopener">Letterboxd</a>` : ""}</div>
       <div class="reihe" style="margin-top:14px"><button class="btn klein" id="neu" type="button">Daten aktualisieren</button><button class="btn klein ghost danger" id="weg" type="button">Entfernen</button></div>`;
     $("#neu", p).onclick = ev => aktualisieren(f, ev.currentTarget); $("#weg", p).onclick = () => loeschen(f);
   }
