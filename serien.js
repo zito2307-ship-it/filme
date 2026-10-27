@@ -1,7 +1,7 @@
 /* Filmabend – Serien. Eigener Tab mit Watchlist, Status, Bewertungen für Serie / Staffel / Folge, Heatmap und Rangliste.
    Nutzt die gemeinsamen Hilfen aus app.js über window.FA. */
 window.Serien = (function () {
-  const Z = { ansicht: "watchlist", rang: { wer: "beide", ebene: "serien" }, suche: "", ergebnisse: null, offen: {}, heat: "tmdb", sort: "neu" };
+  const Z = { ansicht: "watchlist", rang: { wer: "beide", ebene: "serien" }, suche: "", ergebnisse: null, start: null, offen: {}, heat: "tmdb", sort: "neu" };
   let sucheTimer;
   const F = () => window.FA;
   const STATUS = [["watchlist", "Watchlist"], ["laufend", "Dabei"], ["gesehen", "Durch"]];
@@ -88,12 +88,33 @@ window.Serien = (function () {
 
   /* ---------- Suche & Hinzufügen ---------- */
   function sucheOeffnen() {
-    const { panel, $, esc, ICON } = F();
-    const p = panel(`<h2>Serie suchen</h2><div class="suchfeld">${ICON.suche}<input id="sq" type="search" placeholder="Serientitel …" value="${esc(Z.suche)}" autocomplete="off"></div><div id="s-inhalt"></div>`, "klein");
+    const { panel, $, esc, ICON, schliessen } = F();
+    const p = panel(`<h2>Serie suchen</h2><div class="suchfeld">${ICON.suche}<input id="sq" type="search" placeholder="Serientitel …" value="${esc(Z.suche)}" autocomplete="off"><button class="leeren" id="s-leeren" type="button" ${Z.suche ? "" : "hidden"}>✕</button></div><div id="s-inhalt"></div>`, "klein");
+    // Beim Schließen alles vergessen – nächstes Öffnen startet frisch
+    const zu = () => { Z.suche = ""; Z.ergebnisse = null; Z.start = null; schliessen(); };
+    $(".zu", p).onclick = zu; p.parentElement.onclick = e => { if (e.target === e.currentTarget) zu(); };
     const q = $("#sq", p);
-    q.oninput = () => { Z.suche = q.value; clearTimeout(sucheTimer); sucheTimer = setTimeout(() => suchen(p), 350); };
+    q.oninput = () => { Z.suche = q.value; $("#s-leeren", p).hidden = !q.value; clearTimeout(sucheTimer); if (!q.value.trim()) { Z.ergebnisse = null; startseite(p); return; } sucheTimer = setTimeout(() => suchen(p), 350); };
+    $("#s-leeren", p).onclick = () => { Z.suche = ""; Z.ergebnisse = null; q.value = ""; $("#s-leeren", p).hidden = true; startseite(p); q.focus(); };
     q.focus();
-    if (Z.suche) { if (Z.ergebnisse) zeigeErgebnisse(p); else suchen(p); }
+    if (Z.suche.trim()) { if (Z.ergebnisse) zeigeErgebnisse(p); else suchen(p); } else startseite(p);
+  }
+  // Startseite der Suche: passende Vorschläge, Bestbewertete (zum schnellen „Durch“-Eintragen), Beliebte
+  async function startseite(p) {
+    const { $, S, esc, fehlerText } = F(); const el = $("#s-inhalt", p); if (!el) return;
+    if (!Z.start) {
+      el.innerHTML = '<div class="empty"><span class="lade"></span></div>';
+      try { Z.start = await Store.film("serie_start", { seeds: seeds("alle"), quer: F().filmSeeds("alle").filter(x => x.gewicht >= 1.5), ausschluss: (S.serien || []).map(s => s.tmdb_id) }); }
+      catch (x) { el.innerHTML = `<div class="empty"><b>Vorschläge nicht geladen</b>${esc(fehlerText(x))}</div>`; return; }
+    }
+    if (Z.suche.trim() || !F().sheet.contains(p)) return;
+    const gesehen = new Set(); const nurNeu = l => (l || []).filter(x => !gesehen.has(x.tmdb_id) && gesehen.add(x.tmdb_id));
+    const block = (titel, hinweis, liste) => liste.length ? `<h3 class="sheet-h3">${titel}</h3>${hinweis ? `<p class="sheet-hinweis">${hinweis}</p>` : ""}<div class="liste">${liste.map(zeileHTML).join("")}</div>` : "";
+    el.innerHTML = block("Passend zu dem, was ihr feiert", "", nurNeu(Z.start.passend))
+      + block("Schon gesehen? Die Bestbewerteten", "Zum schnellen Eintragen: „Durch“ antippen, wenn ihr sie kennt.", nurNeu(Z.start.top))
+      + block("Gerade beliebt", "", nurNeu(Z.start.beliebt))
+      || `<div class="empty">Tipp einen Serientitel ein.</div>`;
+    zeilenBinden(el, { bleiben: true });
   }
   async function suchen(p) {
     const { $, esc, fehlerText } = F();
@@ -109,23 +130,31 @@ window.Serien = (function () {
     const drin = (S.serien || []).find(x => x.tmdb_id === r.tmdb_id);
     const u = [r.jahr, r.rolle || null, (r.genres || []).slice(0, 2).join(", "), r.tmdb_rating ? "TMDB " + r.tmdb_rating : null].filter(Boolean).map(esc).join(" · ");
     return `<div class="zeile" data-stmdb="${r.tmdb_id}"><div class="offen" role="button" tabindex="0"><div class="plakat">${r.poster ? `<img src="${bild(r.poster, "w185")}" alt="" loading="lazy">` : `<div class="ohne">${esc(r.titel)}</div>`}</div>
-      <div class="inhalt">${r.wegen && r.wegen.length ? `<div class="wegen">Weil ihr „${esc(r.wegen[0])}“ mögt</div>` : ""}<h3>${esc(r.titel)}</h3><div class="u">${u}</div><p>${esc(r.beschreibung)}</p>
+      <div class="inhalt">${r.wegen && r.wegen.length ? `<div class="wegen">${F().wegenText(r.wegen[0])}</div>` : ""}<h3>${esc(r.titel)}</h3><div class="u">${u}</div><p>${esc(r.beschreibung)}</p>
       <div class="aktionen">${drin ? `<span class="ok">✓ ${statusText(drin.status)}</span>` : STATUS.map(x => `<button class="btn klein${x[0] === "watchlist" ? " primary" : ""}" data-add="${x[0]}" type="button">${x[0] === "watchlist" ? "+ Watchlist" : x[1]}</button>`).join("")}</div></div></div></div>`;
   }
-  function zeilenBinden(el) {
+  // opt.bleiben: Suchblatt bleibt nach dem Eintragen offen; Vorschau bekommt einen Zurück-Knopf
+  function zeilenBinden(el, opt = {}) {
     const { $, S } = F();
     el.querySelectorAll(".zeile[data-stmdb]").forEach(z => {
       const id = parseInt(z.dataset.stmdb);
-      z.querySelectorAll("[data-add]").forEach(b => b.onclick = ev => { ev.stopPropagation(); hinzufuegen(id, b.dataset.add, b); });
-      $(".offen", z).onclick = ev => { if (ev.target.closest("[data-add]")) return; const drin = (S.serien || []).find(x => x.tmdb_id === id); if (drin) oeffneSerie(drin); else vorschau(id); };
+      z.querySelectorAll("[data-add]").forEach(b => b.onclick = ev => { ev.stopPropagation(); hinzufuegen(id, b.dataset.add, b, opt); });
+      $(".offen", z).onclick = ev => { if (ev.target.closest("[data-add]")) return; const drin = (S.serien || []).find(x => x.tmdb_id === id); if (drin) oeffneSerie(drin, opt); else vorschau(id, opt); };
     });
   }
   function zeigeErgebnisse(p) {
     const { $ } = F();
     const el = $("#s-inhalt", p); if (!el) return;
     el.innerHTML = Z.ergebnisse.length ? `<div class="liste">${Z.ergebnisse.map(zeileHTML).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>Vielleicht den Originaltitel probieren.</div>`;
-    zeilenBinden(el);
+    zeilenBinden(el, { bleiben: true });
   }
+  // Nach dem Eintragen aus dem Suchblatt: Liste an Ort und Stelle auffrischen (✓ statt Knöpfe)
+  function suchblattAuffrischen() {
+    const p = document.querySelector("#sheet .panel");
+    if (p && p.querySelector("#s-inhalt")) { Z.suche.trim() ? zeigeErgebnisse(p) : startseite(p); return true; }
+    return false;
+  }
+  const zurueckKnopf = () => `<button class="zurueck-sheet" id="s-zurueck" type="button">← Zur Suche</button>`;
   // Saatgut für Serien-Empfehlungen: wie bei Filmen, Gewicht nach eurer Gesamtwertung
   function seeds(basis) {
     const { S } = F(); const out = [];
@@ -140,7 +169,7 @@ window.Serien = (function () {
     }
     return out;
   }
-  async function hinzufuegen(tmdb_id, status, btn) {
+  async function hinzufuegen(tmdb_id, status, btn, opt = {}) {
     const { S, toast, fehlerText, schliessen, heute } = F();
     if ((S.serien || []).some(s => s.tmdb_id === tmdb_id)) { toast("Ist schon eingetragen."); return; }
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="lade"></span>'; }
@@ -150,19 +179,23 @@ window.Serien = (function () {
       neu.bewertungen = []; S.serien.unshift(neu);
       toast(status === "watchlist" ? "Auf die Serien-Watchlist gesetzt" : status === "laufend" ? "Als „Dabei“ eingetragen" : "Als „Durch“ eingetragen");
       S.empfVeraltet = true;
-      if (S.tab === "serien") { Z.ansicht = status; schliessen(); render(); if (status !== "watchlist") oeffneSerie(neu); }
-      else { F().render(); if (document.querySelector("#sheet .panel")) { schliessen(); } }
+      if (S.tab === "serien") Z.ansicht = status;
+      F().render();
+      if (opt.bleiben) { if (!suchblattAuffrischen()) sucheOeffnen(); return neu; } // zurück zur Suchliste, Blatt bleibt offen
+      if (document.querySelector("#sheet .panel")) schliessen();
     } catch (x) { toast(fehlerText(x)); if (btn) { btn.disabled = false; btn.textContent = statusText(status); } }
   }
-  async function vorschau(tmdb_id) {
+  async function vorschau(tmdb_id, opt = {}) {
     const { panel, $, esc, fehlerText, schliessen, trailerBinden, personenBinden } = F();
-    const p = panel(`<div class="empty"><span class="lade"></span></div>`);
+    const p = panel(`${opt.bleiben ? zurueckKnopf() : ""}<div class="empty"><span class="lade"></span></div>`);
+    if (opt.bleiben) $("#s-zurueck", p).onclick = sucheOeffnen;
     let d; try { d = (await Store.film("serie_details", { tmdb_id })).serie; } catch (x) { p.innerHTML = `<button class="zu" type="button">✕</button><div class="empty"><b>Konnte nicht laden</b>${esc(fehlerText(x))}</div>`; $(".zu", p).onclick = schliessen; return; }
     if (!F().sheet.contains(p)) return;
     d.bewertungen = []; d.id = "vorschau";
-    p.innerHTML = `<button class="zu" type="button" aria-label="Schließen">✕</button>${detailHTML(d, false)}`; $(".zu", p).onclick = schliessen; trailerBinden(d); personenBinden(p);
+    p.innerHTML = `<button class="zu" type="button" aria-label="Schließen">✕</button>${opt.bleiben ? zurueckKnopf() : ""}${detailHTML(d, false)}`; $(".zu", p).onclick = schliessen; trailerBinden(d); personenBinden(p);
+    if (opt.bleiben) $("#s-zurueck", p).onclick = sucheOeffnen;
     $("#s-aktionen", p).innerHTML = `<div class="status-reihe">${STATUS.map(x => `<button class="btn${x[0] === "watchlist" ? " primary" : ""}" data-add="${x[0]}" type="button">${x[0] === "watchlist" ? "+ Watchlist" : x[1]}</button>`).join("")}</div>`;
-    p.querySelectorAll("[data-add]").forEach(b => b.onclick = () => hinzufuegen(tmdb_id, b.dataset.add, b));
+    p.querySelectorAll("[data-add]").forEach(b => b.onclick = () => hinzufuegen(tmdb_id, b.dataset.add, b, opt));
     staffelnBinden(d, p);
   }
 
@@ -269,19 +302,20 @@ window.Serien = (function () {
       ${andere.map(b => `<div class="bewertung-box"><div class="wer"><span>${esc(nameVon(b.user_id))}</span><b>${pkt(b.punkte)}/10</b></div>${mitText(b) ? `<div class="mit-info">${esc(mitText(b))}</div>` : ""}${b.kommentar ? `<div class="kommentar">„${esc(b.kommentar)}“</div>` : ""}</div>`).join("")}
       ${S.profile.filter(p => p.id !== S.user.id && !andere.some(b => b.user_id === p.id)).map(p => `<div class="bewertung-box"><div class="wer"><span>${esc(p.name)}</span><span style="color:var(--fg3)">hat noch nicht bewertet</span></div></div>`).join("")}`;
   }
-  function oeffneSerie(s) {
+  function oeffneSerie(s, opt = {}) {
     const { panel, $, esc, datum, nameVon, toast, trailerBinden, personenBinden, S } = F();
-    const p = panel(detailHTML(s, true)); trailerBinden(s); personenBinden(p);
+    const p = panel(`${opt.bleiben ? zurueckKnopf() : ""}${detailHTML(s, true)}`); trailerBinden(s); personenBinden(p);
+    if (opt.bleiben) $("#s-zurueck", p).onclick = sucheOeffnen;
     const scrollMerken = p.scrollTop;
     // Status
     $("#s-aktionen", p).innerHTML = `<div class="status-reihe status-serie">${STATUS.map(x => `<button class="btn${s.status === x[0] ? " primary" : ""}" data-st="${x[0]}" type="button">${x[1]}</button>`).join("")}</div>`;
     p.querySelectorAll("[data-st].btn").forEach(b => b.onclick = async () => {
       if (b.dataset.st === s.status) return;
-      try { const neu = await Store.serieAendern(s.id, { status: b.dataset.st }); Object.assign(s, neu, { bewertungen: s.bewertungen }); toast("Status: " + statusText(s.status)); render(); oeffneSerie(s); }
+      try { const neu = await Store.serieAendern(s.id, { status: b.dataset.st }); Object.assign(s, neu, { bewertungen: s.bewertungen }); toast("Status: " + statusText(s.status)); render(); oeffneSerie(s, opt); }
       catch (x) { toast("Speichern fehlgeschlagen: " + x.message); }
     });
     // Serienbewertung
-    const neuZeichnen = () => { const top = p.scrollTop; render(); oeffneSerie(s); const np = $(".panel", F().sheet); if (np) np.scrollTop = top; };
+    const neuZeichnen = () => { const top = p.scrollTop; render(); oeffneSerie(s, opt); const np = $(".panel", F().sheet); if (np) np.scrollTop = top; };
     $("#s-bewertung", p).innerHTML = serienBewertungHTML(s);
     raterBinden($("#s-rater", p), s, 0, 0, neuZeichnen);
     const mitBinden = () => $("#s-mit", p).querySelectorAll(".chip").forEach(c => c.onclick = async () => {

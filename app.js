@@ -99,6 +99,7 @@
     S.filme.forEach(f => (f.bewertungen || []).forEach(b => mitTokens(b).forEach(x => { if (x !== "allein" && !x.startsWith("@")) s.add(x); })));
     return [...s].sort((a, b) => a.localeCompare(b, "de"));
   }
+  const wegenText = w => w.startsWith("Serie: ") ? `Weil ihr die Serie „${esc(w.slice(7))}“ feiert` : w.startsWith("Film: ") ? `Weil ihr den Film „${esc(w.slice(6))}“ feiert` : `Weil ihr „${esc(w)}“ mögt`;
   function genresVon(filme) { const m = new Map(); filme.forEach(f => (f.genres || []).forEach(g => m.set(g, (m.get(g) || 0) + 1))); return [...m.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]); }
   function sortiere(filme, art) {
     const l = [...filme];
@@ -308,16 +309,19 @@
     const basis = S.empfBasis, key = art + ":" + basis;
     try {
       if (!S.empfCache[key]) {
+        // Saatgut der eigenen Art plus „quer“: die Lieblinge der anderen Art (Serien färben Filmvorschläge und umgekehrt)
         const sd = serien ? window.Serien.seeds(basis) : seeds(basis);
+        const quer = (serien ? seeds(basis) : window.Serien.seeds(basis)).filter(x => x.gewicht >= 1.5);
+        const gibtSaat = sd.length || quer.length;
         let liste = [];
         if (serien) {
-          const r = sd.length ? await Store.film("serie_empfehlungen", { seeds: sd, ausschluss: (S.serien || []).map(s => s.tmdb_id) }) : (basis === "alle" ? await Store.film("serie_beliebt") : { serien: [] });
+          const r = gibtSaat ? await Store.film("serie_empfehlungen", { seeds: sd, quer, ausschluss: (S.serien || []).map(s => s.tmdb_id) }) : (basis === "alle" ? await Store.film("serie_beliebt") : { serien: [] });
           const vorhanden = new Set((S.serien || []).map(s => s.tmdb_id)); liste = (r.serien || []).filter(x => !vorhanden.has(x.tmdb_id));
         } else {
-          const r = sd.length ? await Store.film("empfehlungen", { seeds: sd, ausschluss: S.filme.map(f => f.tmdb_id) }) : (basis === "alle" ? await Store.film("beliebt") : { filme: [] });
+          const r = gibtSaat ? await Store.film("empfehlungen", { seeds: sd, quer, ausschluss: S.filme.map(f => f.tmdb_id) }) : (basis === "alle" ? await Store.film("beliebt") : { filme: [] });
           const vorhanden = new Set(S.filme.map(f => f.tmdb_id)); liste = (r.filme || []).filter(x => !vorhanden.has(x.tmdb_id));
         }
-        S.empfCache[key] = { quelle: sd.length ? "eure" : "beliebt", filme: liste };
+        S.empfCache[key] = { quelle: gibtSaat ? "eure" : "beliebt", filme: liste };
       }
     } catch (x) { $("#inhalt").innerHTML = `<div class="empty"><b>Keine Vorschläge</b>${esc(fehlerText(x))}</div>`; return; }
     if (S.tab !== "fuerdich" || S.empfArt + ":" + S.empfBasis !== key) return;
@@ -340,7 +344,7 @@
     const u = [f.jahr, f.rolle || null, (f.genres || []).slice(0, 2).join(", "), f.tmdb_rating ? "TMDB " + f.tmdb_rating : null].filter(Boolean).map(esc).join(" · ");
     return `<div class="zeile" data-tmdb="${f.tmdb_id}">
       <div class="offen" role="button" tabindex="0"><div class="plakat">${f.poster ? `<img src="${bild(f.poster, "w185")}" alt="" loading="lazy">` : `<div class="ohne">${esc(f.titel)}</div>`}</div>
-        <div class="inhalt">${f.wegen && f.wegen.length ? `<div class="wegen">Weil ihr „${esc(f.wegen[0])}“ mögt</div>` : ""}<h3>${esc(f.titel)}</h3>
+        <div class="inhalt">${f.wegen && f.wegen.length ? `<div class="wegen">${wegenText(f.wegen[0])}</div>` : ""}<h3>${esc(f.titel)}</h3>
           <div class="u">${u}</div><p>${esc(f.beschreibung)}</p>
           <div class="aktionen">${drin ? `<span class="ok">${drin.status === "gesehen" ? "✓ Schon gesehen" : "✓ Auf der Watchlist"}</span>` : `<button class="btn klein primary" data-add="watchlist" type="button">+ Watchlist</button><button class="btn klein" data-add="gesehen" type="button">Schon gesehen</button>`}</div>
         </div></div></div>`;
@@ -623,6 +627,6 @@
   }
 
   // Gemeinsame Hilfen für serien.js
-  window.FA = { S, $, view, sheet, esc, datum, pkt, bild, toast, panel, schliessen, ICON, nameVon, kurz, ich, andereProfile, mitTokens, mitText, bekannteNamen, fehlerText, heute, personHTML, personenBinden, anbieterHTML, trailerBinden, schluesselHinweis, hinweisBinden, render, renderTabs };
+  window.FA = { S, $, view, sheet, esc, datum, pkt, bild, toast, panel, schliessen, ICON, nameVon, kurz, ich, andereProfile, mitTokens, mitText, bekannteNamen, fehlerText, heute, personHTML, personenBinden, anbieterHTML, trailerBinden, schluesselHinweis, hinweisBinden, render, renderTabs, wegenText, filmSeeds: seeds };
   start();
 })();

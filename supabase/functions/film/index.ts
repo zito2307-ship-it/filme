@@ -167,23 +167,81 @@ async function serieDetails(id: number, k: Schluessel) {
   };
 }
 
-async function empfehlungenTV(seeds: { tmdb_id: number; gewicht: number; titel: string }[], ausschluss: number[], key: string) {
+/* ---------- Empfehlungen über Kreuz: Serien → Filme und Filme → Serien ----------
+   TMDB kennt keine gemischten Empfehlungen. Darum: Schlagwörter, Genres und Personen der Lieblingstitel
+   nehmen und damit die andere Medienart durchsuchen (discover). Geringeres Gewicht als direkte Empfehlungen. */
+type Seed = { tmdb_id: number; gewicht: number; titel: string };
+const TV_ZU_FILM_GENRE: Record<number, number[]> = { 10759: [28, 12], 10765: [878, 14], 10768: [10752], 10762: [16, 10751], 10766: [18], 16: [16], 35: [35], 80: [80], 99: [99], 18: [18], 10751: [10751], 9648: [9648], 37: [37] };
+const FILM_ZU_TV_GENRE: Record<number, number[]> = { 28: [10759], 12: [10759], 878: [10765], 14: [10765], 10752: [10768], 53: [80, 9648], 27: [9648], 10749: [18], 16: [16], 35: [35], 80: [80], 99: [99], 18: [18], 10751: [10751], 9648: [9648], 37: [37] };
+type Sammler = Map<number, { film: any; score: number; wegen: Map<string, number> }>;
+function sammle(map: Sammler, liste: any[], gewicht: number, wegen: string, raus: Set<number>, minStimmen: number) {
+  (liste || []).forEach((m: any, pos: number) => {
+    if (!m || raus.has(m.id) || !m.poster_path || (m.vote_count || 0) < minStimmen) return;
+    const beitrag = gewicht * (1 / (1 + pos * 0.15));
+    const e = map.get(m.id) || { film: m, score: 0, wegen: new Map() };
+    e.score += beitrag; e.wegen.set(wegen, (e.wegen.get(wegen) || 0) + beitrag); map.set(m.id, e);
+  });
+}
+async function querFilmeAusSerien(seeds: Seed[], raus: Set<number>, map: Sammler, key: string) {
+  const top = [...seeds].sort((a, b) => b.gewicht - a.gewicht).slice(0, 4);
+  await Promise.all(top.map(async s => {
+    try {
+      const [d, kw] = await Promise.all([tmdb(`/tv/${s.tmdb_id}`, { append_to_response: "credits" }, key), tmdb(`/tv/${s.tmdb_id}/keywords`, {}, key).catch(() => ({ results: [] }))]);
+      const woerter = (kw.results || []).slice(0, 5).map((k: any) => k.id);
+      const leute = [...(d.created_by || []).map((p: any) => p.id), ...(d.credits?.cast || []).slice(0, 3).map((p: any) => p.id)].slice(0, 4);
+      const genres = [...new Set((d.genres || []).flatMap((g: any) => TV_ZU_FILM_GENRE[g.id] || []))].slice(0, 2);
+      const basis = { language: "de-DE", region: "DE", include_adult: "false", sort_by: "vote_average.desc" };
+      const wegen = "Serie: " + s.titel; const g = s.gewicht * 0.6;
+      const [a, b, c] = await Promise.all([
+        woerter.length ? tmdb("/discover/movie", { ...basis, with_keywords: woerter.join("|"), "vote_count.gte": "300" }, key).catch(() => ({})) : {},
+        leute.length ? tmdb("/discover/movie", { ...basis, with_people: leute.join("|"), "vote_count.gte": "300" }, key).catch(() => ({})) : {},
+        genres.length ? tmdb("/discover/movie", { ...basis, with_genres: genres.join(","), "vote_count.gte": "3000" }, key).catch(() => ({})) : {},
+      ]);
+      sammle(map, a.results, g, wegen, raus, 300); sammle(map, b.results, g * 0.8, wegen, raus, 300); sammle(map, c.results, g * 0.3, wegen, raus, 3000);
+    } catch { /* eine Serie ohne Daten – egal */ }
+  }));
+}
+async function querSerienAusFilmen(seeds: Seed[], raus: Set<number>, map: Sammler, key: string) {
+  const top = [...seeds].sort((a, b) => b.gewicht - a.gewicht).slice(0, 4);
+  await Promise.all(top.map(async s => {
+    try {
+      const [d, kw] = await Promise.all([tmdb(`/movie/${s.tmdb_id}`, {}, key), tmdb(`/movie/${s.tmdb_id}/keywords`, {}, key).catch(() => ({ keywords: [] }))]);
+      const woerter = (kw.keywords || []).slice(0, 5).map((k: any) => k.id);
+      const genres = [...new Set((d.genres || []).flatMap((g: any) => FILM_ZU_TV_GENRE[g.id] || []))].slice(0, 2);
+      const basis = { language: "de-DE", include_adult: "false", sort_by: "vote_average.desc" };
+      const wegen = "Film: " + s.titel; const g = s.gewicht * 0.6;
+      const [a, c] = await Promise.all([
+        woerter.length ? tmdb("/discover/tv", { ...basis, with_keywords: woerter.join("|"), "vote_count.gte": "150" }, key).catch(() => ({})) : {},
+        genres.length ? tmdb("/discover/tv", { ...basis, with_genres: genres.join(","), "vote_count.gte": "1500", without_genres: "10763,10764,10767" }, key).catch(() => ({})) : {},
+      ]);
+      sammle(map, a.results, g, wegen, raus, 150); sammle(map, c.results, g * 0.3, wegen, raus, 1500);
+    } catch { /* egal */ }
+  }));
+}
+function abschluss(map: Sammler) {
+  return [...map.values()].sort((a, b) => b.score - a.score).slice(0, 40);
+}
+
+async function empfehlungenTV(seeds: Seed[], ausschluss: number[], key: string, quer: Seed[] = []) {
   const top = [...seeds].sort((a, b) => b.gewicht - a.gewicht).slice(0, 12);
   const raus = new Set(ausschluss);
-  const punkte = new Map<number, { serie: any; score: number; wegen: Map<string, number> }>();
-  const listen = await Promise.all(top.map(s => tmdb(`/tv/${s.tmdb_id}/recommendations`, { language: "de-DE", page: "1" }, key).catch(() => ({ results: [] }))));
+  const punkte: Sammler = new Map();
+  const [listen] = await Promise.all([
+    Promise.all(top.map(s => tmdb(`/tv/${s.tmdb_id}/recommendations`, { language: "de-DE", page: "1" }, key).catch(() => ({ results: [] })))),
+    quer.length ? querSerienAusFilmen(quer, raus, punkte, key) : Promise.resolve(),
+  ]);
   listen.forEach((l, i) => {
     const s = top[i];
     (l.results || []).forEach((m: any, pos: number) => {
       if (raus.has(m.id) || !m.poster_path || (m.vote_count || 0) < 30) return;
       const beitrag = s.gewicht * (1 / (1 + pos * 0.12)) * ((m.vote_average || 0) >= 6.5 ? 1 : 0.5);
-      const e = punkte.get(m.id) || { serie: m, score: 0, wegen: new Map() };
+      const e = punkte.get(m.id) || { film: m, score: 0, wegen: new Map() };
       e.score += beitrag; e.wegen.set(s.titel, (e.wegen.get(s.titel) || 0) + beitrag);
       punkte.set(m.id, e);
     });
   });
-  const sortiert = [...punkte.values()].sort((a, b) => b.score - a.score).slice(0, 40);
-  const serien = await kompaktTV(sortiert.map(e => e.serie), key);
+  const sortiert = abschluss(punkte);
+  const serien = await kompaktTV(sortiert.map(e => e.film), key);
   return serien.map((s, i) => ({ ...s, wegen: [...sortiert[i].wegen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]) }));
 }
 
@@ -284,11 +342,14 @@ async function details(tmdbId: number, k: Schluessel) {
   };
 }
 
-async function empfehlungen(seeds: { tmdb_id: number; gewicht: number; titel: string }[], ausschluss: number[], key: string) {
+async function empfehlungen(seeds: Seed[], ausschluss: number[], key: string, quer: Seed[] = []) {
   const top = [...seeds].sort((a, b) => b.gewicht - a.gewicht).slice(0, 12);
   const raus = new Set(ausschluss);
-  const punkte = new Map<number, { film: any; score: number; wegen: Map<string, number> }>();
-  const listen = await Promise.all(top.map(s => tmdb(`/movie/${s.tmdb_id}/recommendations`, { language: "de-DE", page: "1" }, key).catch(() => ({ results: [] }))));
+  const punkte: Sammler = new Map();
+  const [listen] = await Promise.all([
+    Promise.all(top.map(s => tmdb(`/movie/${s.tmdb_id}/recommendations`, { language: "de-DE", page: "1" }, key).catch(() => ({ results: [] })))),
+    quer.length ? querFilmeAusSerien(quer, raus, punkte, key) : Promise.resolve(),
+  ]);
   listen.forEach((l, i) => {
     const s = top[i];
     (l.results || []).forEach((m: any, pos: number) => {
@@ -299,7 +360,7 @@ async function empfehlungen(seeds: { tmdb_id: number; gewicht: number; titel: st
       punkte.set(m.id, e);
     });
   });
-  const sortiert = [...punkte.values()].sort((a, b) => b.score - a.score).slice(0, 40);
+  const sortiert = abschluss(punkte);
   const filme = await kompakt(sortiert.map(e => e.film), key);
   return filme.map((f, i) => ({ ...f, wegen: [...sortiert[i].wegen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]) }));
 }
@@ -340,8 +401,19 @@ Deno.serve(async (req: Request) => {
       }
       case "serie_empfehlungen": {
         const seeds = Array.isArray(body.seeds) ? body.seeds : [];
-        if (!seeds.length) return antwort({ serien: [] });
-        return antwort({ serien: await empfehlungenTV(seeds, Array.isArray(body.ausschluss) ? body.ausschluss : [], k.tmdb) });
+        if (!seeds.length && !(Array.isArray(body.quer) && body.quer.length)) return antwort({ serien: [] });
+        return antwort({ serien: await empfehlungenTV(seeds, Array.isArray(body.ausschluss) ? body.ausschluss : [], k.tmdb, Array.isArray(body.quer) ? body.quer : []) });
+      }
+      case "serie_start": { // Startseite der Serien-Suche: passende Vorschläge, Bestbewertete, Beliebte
+        const seeds = Array.isArray(body.seeds) ? body.seeds : [];
+        const raus = Array.isArray(body.ausschluss) ? body.ausschluss : [];
+        const [passend, top, beliebt] = await Promise.all([
+          (seeds.length || (Array.isArray(body.quer) && body.quer.length)) ? empfehlungenTV(seeds, raus, k.tmdb, Array.isArray(body.quer) ? body.quer : []) : Promise.resolve([]),
+          tmdb("/tv/top_rated", { language: "de-DE", page: "1" }, k.tmdb).then(d => kompaktTV(d.results || [], k.tmdb)).catch(() => []),
+          tmdb("/tv/popular", { language: "de-DE", page: "1" }, k.tmdb).then(d => kompaktTV((d.results || []).filter((m: any) => !(m.genre_ids || []).some((g: number) => [10763, 10764, 10767].includes(g))), k.tmdb)).catch(() => []),
+        ]);
+        const rs = new Set(raus);
+        return antwort({ passend: passend.slice(0, 20), top: top.filter(s => !rs.has(s.tmdb_id)).slice(0, 20), beliebt: beliebt.filter(s => !rs.has(s.tmdb_id)).slice(0, 20) });
       }
       case "serie_beliebt": {
         const d = await tmdb("/tv/popular", { language: "de-DE", page: "1" }, k.tmdb);
@@ -363,8 +435,8 @@ Deno.serve(async (req: Request) => {
       }
       case "empfehlungen": {
         const seeds = Array.isArray(body.seeds) ? body.seeds : [];
-        if (!seeds.length) return antwort({ filme: [] });
-        return antwort({ filme: await empfehlungen(seeds, Array.isArray(body.ausschluss) ? body.ausschluss : [], k.tmdb) });
+        if (!seeds.length && !(Array.isArray(body.quer) && body.quer.length)) return antwort({ filme: [] });
+        return antwort({ filme: await empfehlungen(seeds, Array.isArray(body.ausschluss) ? body.ausschluss : [], k.tmdb, Array.isArray(body.quer) ? body.quer : []) });
       }
       default: return antwort({ fehler: "unbekannte aktion" }, 400);
     }
