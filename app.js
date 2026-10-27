@@ -115,7 +115,7 @@
     const eigene = (f.bewertungen || []).map(b => `<span>${esc(kurz(b.user_id))} ${pkt(b.punkte)}</span>`).join("");
     return `<button class="karte" data-id="${f.id}" type="button">
       <div class="plakat">${f.poster ? `<img src="${bild(f.poster, "w342")}" alt="" loading="lazy">` : `<div class="ohne">${esc(f.titel)}</div>`}
-        ${f.imdb_rating ? `<span class="eck">★ ${f.imdb_rating}</span>` : ""}${f.rt_rating != null ? `<span class="eck rt">🍅 ${f.rt_rating}%</span>` : ""}
+        ${f.imdb_rating || f.lb_rating || f.rt_rating != null ? `<div class="leiste" title="IMDb · Letterboxd · Rotten Tomatoes"><span class="i">${f.imdb_rating ? "★ " + f.imdb_rating : ""}</span><span class="l">${f.lb_rating ? pkt(f.lb_rating) : ""}</span><span class="r">${f.rt_rating != null ? f.rt_rating + "%" : ""}</span></div>` : ""}
         ${eigene ? `<div class="eigene">${eigene}</div>` : ""}</div>
       <div class="t">${esc(f.titel)}</div><div class="u">${f.jahr || ""}${f.genres && f.genres[0] ? " · " + esc(f.genres[0]) : ""}</div></button>`;
   }
