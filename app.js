@@ -522,7 +522,7 @@
     };
     const zeile = (a, i) => `<div class="angebot">
       <button class="angebot-kopf" type="button" aria-expanded="false">
-        <span class="logo">${a.logo ? `<img src="${esc(a.logo)}" alt="" loading="lazy">` : ""}</span>
+        <span class="anbieter-logo">${a.logo ? `<img src="${esc(a.logo)}" alt="" loading="lazy">` : ""}</span>
         <span class="name"><b>${esc(a.name)}</b>${sprache(a)}</span>
         <span class="zelle${a.flat ? " ja" : ""}">${flatText(a)}</span>
         <span class="zelle">${a.leihen_ab ? `ab ${preis(a.leihen_ab)}` : "–"}</span>

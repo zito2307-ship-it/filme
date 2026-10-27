@@ -327,8 +327,8 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .angebot:last-child { border-bottom: 0; }
 .angebot-kopf { width: 100%; background: none; border: 0; padding: 9px 10px; color: inherit; text-align: left; font: inherit; }
 .angebot-kopf[aria-expanded="true"] { background: color-mix(in srgb, var(--bg2) 60%, var(--bg)); }
-.angebot-kopf .logo { width: 34px; height: 34px; border-radius: 9px; overflow: hidden; background: var(--bg3); display: block; }
-.angebot-kopf .logo img { width: 100%; height: 100%; object-fit: cover; }
+.angebot-kopf .anbieter-logo { width: 34px; height: 34px; border-radius: 9px; overflow: hidden; background: var(--bg3); display: block; }
+.angebot-kopf .anbieter-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .angebot-kopf .name { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .angebot-kopf .name b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .angebot-kopf .zelle { font-size: 13px; font-weight: 600; color: var(--fg2); white-space: nowrap; }
@@ -345,7 +345,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .empty.klein { padding: 18px 12px; font-size: 14px; }
 @media (max-width: 420px) {
   .angebot-titel, .angebot-kopf { grid-template-columns: 30px minmax(0, 1fr) 46px 60px 60px; gap: 6px; }
-  .angebot-kopf .logo { width: 30px; height: 30px; }
+  .angebot-kopf .anbieter-logo { width: 30px; height: 30px; }
   .angebot-kopf .zelle { font-size: 12px; }
   .angebot-kopf .name b { font-size: 13px; }
   .angebot-details { padding-left: 10px; }
