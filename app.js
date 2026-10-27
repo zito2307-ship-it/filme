@@ -3,7 +3,7 @@
   const $ = (s, el) => (el || document).querySelector(s);
   const view = $("#view"), tabs = $("#tabs"), tablist = $("#tablist"), sheet = $("#sheet"), toastEl = $("#toast"), meBtn = $("#me");
   const IMG = "https://image.tmdb.org/t/p/";
-  const S = { session: null, user: null, profile: [], filme: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
+  const S = { session: null, user: null, profile: [], filme: [], serien: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
     genre: { watchlist: null, gesehen: null, zufall: new Set(), fuerdich: null }, sort: { watchlist: "neu", gesehen: "neu" },
     suche: "", ergebnisse: null, personen: null, person: null, personSort: "beliebt", beliebt: null, empfCache: {}, empfVeraltet: false, empfBasis: "alle",
     ansicht: "raster", rang: { wer: "beide", nur: "alle" },
@@ -20,11 +20,12 @@
     watchlist: '<svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>',
     gesehen: '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
     zufall: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="16" cy="8" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="8" cy="16" r="1.2" fill="currentColor"/><circle cx="16" cy="16" r="1.2" fill="currentColor"/></svg>',
+    serien: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 21h8M12 18v3M8 3l4 3 4-3"/></svg>',
     fuerdich: '<svg viewBox="0 0 24 24"><path d="m12 3 2.5 5.5 6 .7-4.5 4 1.3 6L12 16.2 6.7 19.2l1.3-6-4.5-4 6-.7z"/></svg>',
     suche: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
     play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
   };
-  const TABS = [["watchlist", "Watchlist"], ["gesehen", "Gesehen"], ["zufall", "Zufall"], ["fuerdich", "Für uns"], ["suche", "Suchen"]];
+  const TABS = [["watchlist", "Watchlist"], ["gesehen", "Gesehen"], ["zufall", "Zufall"], ["fuerdich", "Für uns"], ["serien", "Serien"], ["suche", "Suchen"]];
 
   /* ---------- Start & Login ---------- */
   async function start() {
@@ -53,8 +54,8 @@
   async function laden() {
     S.user = S.session.user; view.innerHTML = '<div class="empty">Lädt …</div>';
     try {
-      const [profile, filme, keys] = await Promise.all([Store.profile(), Store.filme(), Store.schluesselStatus()]);
-      S.profile = profile; S.filme = filme; S.keys = keys || S.keys;
+      const [profile, filme, serien, keys] = await Promise.all([Store.profile(), Store.filme(), Store.serien(), Store.schluesselStatus()]);
+      S.profile = profile; S.filme = filme; S.serien = serien; S.keys = keys || S.keys;
     } catch (x) { view.innerHTML = `<div class="empty"><b>Daten konnten nicht geladen werden</b>${esc(x.message)}</div>`; return; }
     meBtn.textContent = (ich() || {}).name || "Ich"; meBtn.hidden = false; meBtn.onclick = einstellungen;
     tabs.hidden = false; renderTabs(); render();
@@ -72,6 +73,7 @@
     if (S.tab === "watchlist" || S.tab === "gesehen") renderListe(S.tab);
     else if (S.tab === "zufall") renderZufall();
     else if (S.tab === "fuerdich") renderFuerDich();
+    else if (S.tab === "serien") window.Serien.render();
     else renderSuche();
   }
   function schluesselHinweis() {
@@ -600,8 +602,10 @@
       try { await Store.schluesselSetzen(k, v); S.keys[k] = true; S.empfVeraltet = true; toast("Gespeichert"); einstellungen(); render(); }
       catch (x) { toast("Fehler: " + x.message); b.disabled = false; }
     });
-    $("#abmelden", p).onclick = async () => { await Store.abmelden(); S.filme = []; S.empfVeraltet = true; zeigeLogin(); };
+    $("#abmelden", p).onclick = async () => { await Store.abmelden(); S.filme = []; S.serien = []; S.empfVeraltet = true; zeigeLogin(); };
   }
 
+  // Gemeinsame Hilfen für serien.js
+  window.FA = { S, $, view, sheet, esc, datum, pkt, bild, toast, panel, schliessen, ICON, nameVon, kurz, ich, andereProfile, mitTokens, mitText, bekannteNamen, fehlerText, heute, personHTML, personenBinden, anbieterHTML, trailerBinden, schluesselHinweis, hinweisBinden, render, renderTabs };
   start();
 })();

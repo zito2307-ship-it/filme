@@ -29,6 +29,21 @@ window.Store = (function () {
     },
     async bewertungLoeschen(film_id, user_id) { pruefe(await sb.from("bewertungen").delete().eq("film_id", film_id).eq("user_id", user_id)); },
 
+    async serien() {
+      const serien = pruefe(await sb.from("serien").select("*").order("erstellt_am", { ascending: false }));
+      const bew = pruefe(await sb.from("serien_bewertungen").select("*"));
+      for (const s of serien) s.bewertungen = bew.filter(b => b.serie_id === s.id).map(b => ({ ...b, punkte: Number(b.punkte) }));
+      return serien;
+    },
+    async serieAnlegen(daten) { const s = pruefe(await sb.from("serien").insert(daten).select("*").single()); return s; },
+    async serieAendern(id, daten) { return pruefe(await sb.from("serien").update(daten).eq("id", id).select("*").single()); },
+    async serieLoeschen(id) { pruefe(await sb.from("serien").delete().eq("id", id)); },
+    async serieBewerten(serie_id, user_id, staffel, folge, punkte, kommentar, mit) {
+      const b = pruefe(await sb.from("serien_bewertungen").upsert({ serie_id, user_id, staffel: staffel || 0, folge: folge || 0, punkte, kommentar: kommentar || null, mit: Array.isArray(mit) ? mit : [] }, { onConflict: "serie_id,user_id,staffel,folge" }).select("*").single());
+      return { ...b, punkte: Number(b.punkte) };
+    },
+    async serieBewertungLoeschen(serie_id, user_id, staffel, folge) { pruefe(await sb.from("serien_bewertungen").delete().match({ serie_id, user_id, staffel: staffel || 0, folge: folge || 0 })); },
+
     async schluesselStatus() { return pruefe(await sb.rpc("schluessel_status")); },
     async schluesselSetzen(schluessel, wert) { pruefe(await sb.rpc("schluessel_setzen", { p_schluessel: schluessel, p_wert: wert })); },
 

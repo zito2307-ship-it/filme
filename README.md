@@ -4,11 +4,11 @@ Private Film-App für Ziu und Alex. Vanilla JS, kein Build-Schritt.
 
 - Live: https://zito2307-ship-it.github.io/filme/ (GitHub Pages, Branch `main`, Ordner `/`)
 - Daten: Supabase-Projekt FILME (`rqjsuklfjrgwvaamftds`)
-- Filmdaten: Edge Function `film` in `supabase/functions/film/` (TMDB + OMDb)
+- Filmdaten: Edge Function `film` in `supabase/functions/film/` (TMDB Filme/Serien/Personen + OMDb + Letterboxd)
 
 ## Dateien
 
-`index.html` (Gerüst), `app.js` (Ansichten), `store.js` (Supabase-Zugriff), `styles.css`, `config.js` (URL + öffentlicher Schlüssel), `sw.js` (Offline-Cache), `manifest.webmanifest`, `icons/`, `vendor/supabase.js`.
+`index.html` (Gerüst), `app.js` (Filme, Ansichten, gemeinsame Hilfen in `window.FA`), `serien.js` (Serien-Tab: Watchlist, Staffeln, Folgen, Heatmap, Rangliste), `store.js` (Supabase-Zugriff), `styles.css`, `config.js` (URL + öffentlicher Schlüssel), `sw.js` (Offline-Cache), `manifest.webmanifest`, `icons/`, `vendor/supabase.js`.
 
 ## Neue Version veröffentlichen
 

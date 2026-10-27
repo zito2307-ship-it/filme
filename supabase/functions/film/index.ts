@@ -94,6 +94,69 @@ async function personFilme(id: number | null, name: string | null, key: string) 
   };
 }
 
+/* ---------- Serien (TMDB TV) ---------- */
+let tvGenreCache: Record<number, string> | null = null;
+async function tvGenres(key: string) {
+  if (tvGenreCache) return tvGenreCache;
+  const d = await tmdb("/genre/tv/list", { language: "de-DE" }, key);
+  tvGenreCache = Object.fromEntries((d.genres || []).map((g: { id: number; name: string }) => [g.id, g.name]));
+  return tvGenreCache!;
+}
+async function kompaktTV(liste: any[], key: string) {
+  const g = await tvGenres(key);
+  return liste.filter(m => m && m.id && m.name).map(m => ({
+    tmdb_id: m.id, titel: m.name, original_titel: m.original_name, jahr: jahr(m.first_air_date), poster: m.poster_path || null,
+    beschreibung: m.overview || "", tmdb_rating: m.vote_average ? Math.round(m.vote_average * 10) / 10 : null, stimmen: m.vote_count || 0,
+    genres: (m.genre_ids || []).map((id: number) => g[id]).filter(Boolean),
+  }));
+}
+async function serieDetails(id: number, k: Schluessel) {
+  const d = await tmdb(`/tv/${id}`, { language: "de-DE", append_to_response: "credits,videos,external_ids,watch/providers", include_video_language: "de,en,null" }, k.tmdb!);
+  let beschreibung = d.overview || "";
+  if (!beschreibung) { try { const en = await tmdb(`/tv/${id}`, { language: "en-US" }, k.tmdb!); beschreibung = en.overview || ""; } catch { /* egal */ } }
+  const videos = (d.videos?.results || []).filter((v: any) => v.site === "YouTube");
+  const rang = (v: any) => (v.type === "Trailer" ? 0 : v.type === "Teaser" ? 10 : 20) + (v.iso_639_1 === "de" ? 0 : v.iso_639_1 === "en" ? 3 : 6) + (v.official ? 0 : 1);
+  videos.sort((a: any, b: any) => rang(a) - rang(b));
+  const person = (p: any) => ({ id: p.id, name: p.name, bild: p.profile_path || null });
+  const cast = (d.credits?.cast || []).slice(0, 14).map((p: any) => ({ ...person(p), rolle: p.character || "" }));
+  const macher = (d.created_by || []).map(person);
+  const de = d["watch/providers"]?.results?.DE || {};
+  const anb = (l: any[]) => (l || []).map(p => ({ name: p.provider_name, logo: p.logo_path || null }));
+  const anbieter = { link: de.link || null, streamen: anb(de.flatrate), leihen: anb(de.rent), kaufen: anb(de.buy), stand: new Date().toISOString().slice(0, 10) };
+  // Alle Staffeln mit Folgen – TMDB erlaubt bis zu 20 Staffeln pro Anfrage über append_to_response
+  const meta = (d.seasons || []).filter((s: any) => s.season_number > 0);
+  const nums: number[] = meta.map((s: any) => s.season_number);
+  const staffeln: any[] = [];
+  for (let i = 0; i < nums.length; i += 20) {
+    const block = nums.slice(i, i + 20);
+    const r = await tmdb(`/tv/${id}`, { language: "de-DE", append_to_response: block.map(n => `season/${n}`).join(",") }, k.tmdb!);
+    for (const n of block) {
+      const s = r[`season/${n}`]; const m = meta.find((x: any) => x.season_number === n) || {};
+      if (!s) continue;
+      staffeln.push({
+        nr: n, name: s.name || m.name || `Staffel ${n}`, start: s.air_date || m.air_date || null, poster: s.poster_path || m.poster_path || null,
+        folgen: (s.episodes || []).map((e: any) => ({ nr: e.episode_number, titel: e.name || "", datum: e.air_date || null, tmdb_rating: e.vote_count ? Math.round(e.vote_average * 10) / 10 : null, stimmen: e.vote_count || 0, still: e.still_path || null, laufzeit: e.runtime || null })),
+      });
+    }
+  }
+  const beendet = d.status === "Ended" || d.status === "Canceled";
+  const imdbId = d.external_ids?.imdb_id || null;
+  const wertungen = imdbId && k.omdb ? await omdb(imdbId, k.omdb) : {};
+  const alleFolgen = staffeln.flatMap(s => s.folgen);
+  return {
+    tmdb_id: d.id, imdb_id: imdbId, titel: d.name, original_titel: d.original_name,
+    jahr: jahr(d.first_air_date), ende_jahr: beendet ? jahr(d.last_air_date) : null, laeuft: !beendet,
+    laufzeit: (d.episode_run_time || [])[0] || (alleFolgen.find((f: any) => f.laufzeit) || {}).laufzeit || null,
+    beschreibung, poster: d.poster_path || null, hintergrund: d.backdrop_path || null,
+    genres: (d.genres || []).map((g: any) => g.name),
+    tmdb_rating: d.vote_average ? Math.round(d.vote_average * 10) / 10 : null,
+    imdb_rating: null, rt_rating: null, metascore: null, ...wertungen,
+    trailer: videos[0]?.key || null, schauspieler: cast, macher, anbieter, staffeln,
+    anzahl_staffeln: staffeln.length, anzahl_folgen: alleFolgen.length,
+    omdb_aktiv: !!k.omdb,
+  };
+}
+
 async function omdb(imdbId: string, key: string) {
   try {
     const r = await fetch(`https://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(key)}`);
@@ -238,6 +301,17 @@ Deno.serve(async (req: Request) => {
       case "person": {
         const r = await personFilme(parseInt(body.id) || null, body.name ? String(body.name) : null, k.tmdb);
         return r ? antwort(r) : antwort({ fehler: "person_unbekannt" }, 404);
+      }
+      case "serie_suche": {
+        const q = String(body.query || "").trim();
+        if (!q) return antwort({ serien: [] });
+        const d = await tmdb("/search/tv", { query: q, language: "de-DE", include_adult: "false", page: "1" }, k.tmdb);
+        return antwort({ serien: await kompaktTV(d.results || [], k.tmdb) });
+      }
+      case "serie_details": {
+        const id = parseInt(body.tmdb_id);
+        if (!id) return antwort({ fehler: "tmdb_id fehlt" }, 400);
+        return antwort({ serie: await serieDetails(id, k) });
       }
       case "beliebt": {
         const d = await tmdb("/movie/popular", { language: "de-DE", region: "DE", page: "1" }, k.tmdb);

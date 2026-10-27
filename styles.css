@@ -152,15 +152,17 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .anbieter .name { font-size: 13px; background: var(--bg3); border-radius: 8px; padding: 6px 10px; }
 .status-reihe { display: flex; gap: 8px; margin-top: 16px; }
 .status-reihe .btn { flex: 1; }
-.sterne { display: flex; gap: 4px; flex-wrap: wrap; }
-.sterne button { width: 34px; height: 34px; border-radius: 9px; background: var(--bg2); border: 1px solid var(--line); font-weight: 700; font-size: 14px; color: var(--fg2); }
+.sterne { display: flex; gap: 4px; }
+.sterne button { flex: 1 1 0; min-width: 0; padding: 0; width: auto; height: 34px; border-radius: 9px; background: var(--bg2); border: 1px solid var(--line); font-weight: 700; font-size: 14px; color: var(--fg2); }
 .sterne button[aria-pressed="true"] { background: var(--akzent); color: var(--akzent-fg); border-color: transparent; }
 .sterne.dez { margin-top: 6px; }
-.sterne.dez button { width: 30px; height: 28px; font-size: 12px; font-weight: 600; border-radius: 7px; }
+.sterne.dez button { height: 28px; font-size: 12px; font-weight: 600; border-radius: 7px; }
 .sterne.dez button:disabled { opacity: .35; cursor: default; }
 .sterne button.unter { background: var(--akzent-weich); border-color: color-mix(in srgb, var(--akzent) 40%, transparent); }
 .bewertung-box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-top: 10px; }
-.bewertung-box .wer { font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; }
+.bewertung-box .wer { font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.bewertung-box .wer > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bewertung-box .wer > :last-child { flex: 0 0 auto; text-align: right; }
 .bewertung-box .wer b { color: var(--akzent); }
 .bewertung-box textarea { width: 100%; margin-top: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; min-height: 56px; resize: vertical; outline: none; }
 .bewertung-box .kommentar { color: var(--fg2); font-size: 14px; font-style: italic; margin-top: 4px; }
@@ -256,3 +258,46 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .person-kopf p { color: var(--fg3); font-size: 13px; margin: 2px 0 0; }
 .kopf.mit-knopf { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .kopf.mit-knopf .btn { flex: 0 0 auto; margin-top: 4px; }
+
+/* Serien */
+.umschalter.vier button { padding: 8px 4px; font-size: 12px; }
+.umschalter.klein { margin: 0; padding: 2px; }
+.umschalter.klein button { padding: 4px 10px; font-size: 11px; }
+.tabs button { font-size: 10px; }
+.heat-kopf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.heat-kopf small { color: var(--fg3); font-size: 11px; }
+.heat { overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+.heat-zeile { display: grid; grid-template-columns: 30px repeat(var(--n), 30px); gap: 3px; margin-bottom: 3px; align-items: center; }
+.heat-label { font-size: 11px; font-weight: 700; color: var(--fg3); }
+.heat-zelle { width: 30px; height: 26px; border: 0; border-radius: 6px; font-size: 10px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.5); padding: 0; }
+.heat-zelle.zukunft { opacity: .35; }
+.staffel { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius-s); margin-bottom: 8px; overflow: hidden; }
+.staffel-kopf { width: 100%; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 8px 12px 8px 8px; color: inherit; text-align: left; }
+.staffel-kopf .plakat { width: 38px; flex: 0 0 38px; border-radius: 6px; box-shadow: none; }
+.staffel-kopf .text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.staffel-kopf .text b { font-size: 15px; }
+.staffel-kopf .text small { color: var(--fg3); font-size: 12px; }
+.staffel-kopf .pfeil { color: var(--fg3); font-size: 20px; transition: transform .2s; }
+.staffel.offen .staffel-kopf .pfeil { transform: rotate(90deg); }
+.badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.mini { background: var(--akzent-weich); color: var(--akzent); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.staffel-inhalt { border-top: 1px solid var(--line); }
+.staffel-bewertung { padding: 10px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg2) 70%, var(--bg)); }
+.staffel-bewertung .wer { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 8px; font-size: 14px; }
+.staffel-bewertung .wer b { color: var(--akzent); }
+.rater .sterne button { height: 30px; font-size: 13px; }
+.rater .sterne.dez button { height: 26px; font-size: 11px; }
+.rater .sterne.dez .weg { flex: 0 0 auto; padding: 0 8px; color: var(--rot); margin-left: 4px; }
+.folge { border-bottom: 1px solid var(--line); }
+.folge:last-child { border-bottom: 0; }
+.folge-kopf { width: 100%; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 9px 12px; color: inherit; text-align: left; }
+.folge-kopf .nr { width: 26px; flex: 0 0 26px; text-align: center; font-weight: 700; color: var(--fg3); font-size: 13px; }
+.folge-kopf .titel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.folge-kopf .titel b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.folge-kopf .titel small { color: var(--fg3); font-size: 11px; }
+.folge.zukunft .folge-kopf { opacity: .55; }
+.folge-rater { padding: 6px 12px 12px 48px; }
+.folge-rater .andere { font-size: 12px; color: var(--fg3); margin-top: 6px; }
+.folge-rater .andere b { color: var(--akzent); }
+.rang-zeile .plakat.breit { width: 72px; aspect-ratio: 16/9; }
+.status-serie .btn { padding: 10px 8px; font-size: 14px; }
