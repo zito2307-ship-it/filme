@@ -65,6 +65,35 @@ async function kompakt(liste: any[], key: string) {
   }));
 }
 
+const ABTEILUNG: Record<string, string> = { Acting: "Schauspiel", Directing: "Regie", Writing: "Drehbuch", Production: "Produktion", Sound: "Musik", Camera: "Kamera", Editing: "Schnitt", Art: "Ausstattung" };
+const JOB: Record<string, string> = { Director: "Regie", Screenplay: "Drehbuch", Writer: "Drehbuch", Story: "Drehbuch", Novel: "Vorlage", Producer: "Produktion", "Executive Producer": "Produktion", "Original Music Composer": "Musik", "Director of Photography": "Kamera", Editor: "Schnitt" };
+
+async function personenSuche(q: string, key: string) {
+  const d = await tmdb("/search/person", { query: q, language: "de-DE", include_adult: "false", page: "1" }, key).catch(() => ({ results: [] }));
+  return (d.results || []).filter((p: any) => p.id && p.name && (p.popularity || 0) > 0.5).slice(0, 6).map((p: any) => ({
+    id: p.id, name: p.name, bild: p.profile_path || null, abteilung: ABTEILUNG[p.known_for_department] || p.known_for_department || "",
+    bekannt_fuer: (p.known_for || []).map((m: any) => m.title || m.name).filter(Boolean).slice(0, 3),
+  }));
+}
+
+// Alle Filme einer Person (Besetzung + wichtige Crew-Jobs), nach Beliebtheit sortiert
+async function personFilme(id: number | null, name: string | null, key: string) {
+  if (!id && name) { const l = await personenSuche(name, key); if (!l.length) return null; id = l[0].id; }
+  if (!id) return null;
+  const [p, c] = await Promise.all([tmdb(`/person/${id}`, { language: "de-DE" }, key), tmdb(`/person/${id}/movie_credits`, { language: "de-DE" }, key)]);
+  const rollen = new Map<number, { film: any; rollen: string[] }>();
+  const merk = (m: any, rolle: string) => { if (!m || !m.id || !m.title) return; const e = rollen.get(m.id) || { film: m, rollen: [] }; if (rolle && !e.rollen.includes(rolle)) e.rollen.push(rolle); rollen.set(m.id, e); };
+  for (const m of c.cast || []) merk(m, m.character ? "als " + m.character : "Schauspiel");
+  for (const m of c.crew || []) if (JOB[m.job]) merk(m, JOB[m.job]);
+  const liste = [...rollen.values()].filter(e => (e.film.vote_count || 0) >= 5 || e.film.poster_path)
+    .sort((a, b) => (b.film.popularity || 0) - (a.film.popularity || 0)).slice(0, 80);
+  const filme = await kompakt(liste.map(e => e.film), key);
+  return {
+    person: { id: p.id, name: p.name, bild: p.profile_path || null, abteilung: ABTEILUNG[p.known_for_department] || p.known_for_department || "", geboren: p.birthday || null, ort: p.place_of_birth || null, anzahl: liste.length },
+    filme: filme.map((f, i) => ({ ...f, rolle: liste[i].rollen.slice(0, 2).join(", "), popularitaet: liste[i].film.popularity || 0 })),
+  };
+}
+
 async function omdb(imdbId: string, key: string) {
   try {
     const r = await fetch(`https://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(key)}`);
@@ -115,7 +144,7 @@ async function details(tmdbId: number, k: Schluessel) {
   videos.sort((a: any, b: any) => rang(a) - rang(b));
   const trailer = videos[0]?.key || null;
 
-  const person = (p: any) => ({ name: p.name, bild: p.profile_path || null });
+  const person = (p: any) => ({ id: p.id, name: p.name, bild: p.profile_path || null });
   const cast = (d.credits?.cast || []).slice(0, 14).map((p: any) => ({ ...person(p), rolle: p.character || "" }));
   const crew = d.credits?.crew || [];
   const sammel = (jobs: string[], max: number) => {
@@ -203,8 +232,12 @@ Deno.serve(async (req: Request) => {
       case "suche": {
         const q = String(body.query || "").trim();
         if (!q) return antwort({ filme: [] });
-        const d = await tmdb("/search/movie", { query: q, language: "de-DE", region: "DE", include_adult: "false", page: "1" }, k.tmdb);
-        return antwort({ filme: await kompakt(d.results || [], k.tmdb) });
+        const [d, personen] = await Promise.all([tmdb("/search/movie", { query: q, language: "de-DE", region: "DE", include_adult: "false", page: "1" }, k.tmdb), personenSuche(q, k.tmdb)]);
+        return antwort({ filme: await kompakt(d.results || [], k.tmdb), personen });
+      }
+      case "person": {
+        const r = await personFilme(parseInt(body.id) || null, body.name ? String(body.name) : null, k.tmdb);
+        return r ? antwort(r) : antwort({ fehler: "person_unbekannt" }, 404);
       }
       case "beliebt": {
         const d = await tmdb("/movie/popular", { language: "de-DE", region: "DE", page: "1" }, k.tmdb);

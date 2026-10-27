@@ -62,6 +62,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .suchfeld { position: relative; margin: 6px 0 14px; }
 .suchfeld input { width: 100%; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 13px 44px 13px 42px; font-size: 16px; outline: none; }
 .suchfeld input:focus { border-color: var(--akzent); }
+.suchfeld input::-webkit-search-cancel-button, .suchfeld input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
 .suchfeld svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; stroke: var(--fg3); fill: none; stroke-width: 2; stroke-linecap: round; }
 .suchfeld .leeren { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: var(--bg3); border: 0; border-radius: 999px; width: 28px; height: 28px; color: var(--fg2); }
 
@@ -132,7 +133,8 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .detail p.text { margin: 0; color: var(--fg2); font-size: 15px; line-height: 1.55; }
 .personen { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none; }
 .personen::-webkit-scrollbar { display: none; }
-.person { flex: 0 0 76px; text-align: center; font-size: 12px; }
+.person { flex: 0 0 76px; text-align: center; font-size: 12px; background: none; border: 0; padding: 0; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.person:active .foto { transform: scale(.94); }
 .person .foto { width: 64px; height: 64px; border-radius: 999px; background: var(--bg3); margin: 0 auto 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--fg3); font-weight: 700; }
 .person .foto img { width: 100%; height: 100%; object-fit: cover; }
 .person b { display: block; font-weight: 600; line-height: 1.2; }
@@ -235,3 +237,22 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .mit .chip { padding: 5px 11px; font-size: 12px; }
 .mit .chip.plus { border-style: dashed; color: var(--fg3); }
 .mit-info { color: var(--fg3); font-size: 13px; margin-top: 2px; }
+
+/* Personen: Suchtreffer, Personenseite, anklickbare Crew */
+.crew-name { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--akzent) 50%, transparent); text-underline-offset: 3px; }
+.personen-treffer { display: flex; gap: 8px; overflow-x: auto; padding: 0 0 12px; scrollbar-width: none; }
+.personen-treffer::-webkit-scrollbar { display: none; }
+.person-treffer { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; max-width: 260px; background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px 6px 6px; color: inherit; text-align: left; }
+.person-treffer .foto { width: 40px; height: 40px; border-radius: 999px; background: var(--bg3); overflow: hidden; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; color: var(--fg3); flex: 0 0 auto; }
+.person-treffer .foto img { width: 100%; height: 100%; object-fit: cover; }
+.person-treffer .text { display: flex; flex-direction: column; min-width: 0; }
+.person-treffer b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person-treffer small { font-size: 11px; color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zurueck { background: none; border: 0; color: var(--akzent); font-weight: 600; font-size: 14px; padding: 6px 0; margin-bottom: 4px; }
+.person-kopf { display: flex; align-items: center; gap: 14px; margin: 4px 0 14px; }
+.person-kopf .foto { width: 72px; height: 72px; border-radius: 999px; background: var(--bg3); overflow: hidden; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; color: var(--fg3); flex: 0 0 auto; }
+.person-kopf .foto img { width: 100%; height: 100%; object-fit: cover; }
+.person-kopf h1 { font-size: 24px; margin: 0; }
+.person-kopf p { color: var(--fg3); font-size: 13px; margin: 2px 0 0; }
+.kopf.mit-knopf { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.kopf.mit-knopf .btn { flex: 0 0 auto; margin-top: 4px; }
