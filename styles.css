@@ -165,12 +165,31 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .meta-zeile { color: var(--fg3); font-size: 12px; margin-top: 18px; }
 
 /* Zufall */
-.zufall-buehne { margin: 10px auto; width: min(240px, 60vw); }
-.zufall-buehne .plakat { box-shadow: var(--schatten); transition: transform .08s; }
-.zufall-buehne.dreht .plakat { transform: scale(.97); }
+/* Spielautomat */
+.slot { --w: min(190px, 50vw); position: relative; margin: 8px auto 0; width: calc(var(--w) + 56px); background: linear-gradient(180deg, color-mix(in srgb, var(--bg2) 80%, var(--akzent) 20%), var(--bg2)); border: 1px solid color-mix(in srgb, var(--akzent) 45%, var(--line)); border-radius: 22px; padding: 10px 14px 12px; box-shadow: var(--schatten), inset 0 1px 0 rgba(255,255,255,.08); }
+.lampen { display: flex; justify-content: space-between; padding: 0 4px; }
+.lampen i { width: 9px; height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--akzent) 35%, var(--bg2)); box-shadow: none; transition: background .2s; }
+.lampen.unten { margin-top: 10px; }
+.slot.dreht .lampen i { animation: lauflicht .9s linear infinite; animation-delay: calc(var(--i) * -.1s); }
+.slot.treffer .lampen i { background: var(--akzent); box-shadow: 0 0 10px var(--akzent); animation: blitzen 1.1s ease-in-out 3; animation-delay: calc(var(--i) * .05s); }
+@keyframes lauflicht { 0%, 100% { background: color-mix(in srgb, var(--akzent) 35%, var(--bg2)); box-shadow: none; } 15% { background: #FFF1C2; box-shadow: 0 0 10px var(--akzent); } }
+@keyframes blitzen { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.fenster { position: relative; margin: 10px auto 0; width: var(--w); overflow: hidden; border-radius: 14px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line), inset 0 18px 22px -14px rgba(0,0,0,.6), inset 0 -18px 22px -14px rgba(0,0,0,.6); }
+.fenster .band { will-change: transform; }
+.fenster .band.ruhe { display: flex; justify-content: center; padding: 8px 0; }
+.reel-item { padding: 5px 8px; opacity: .45; transform: scale(.92); transition: opacity .25s, transform .25s; }
+.reel-item.aktiv { opacity: 1; transform: scale(1); }
+.reel-item .plakat { width: calc(var(--w) - 16px); margin: 0 auto; box-shadow: var(--schatten); }
+.fenster .rahmen { pointer-events: none; position: absolute; inset: 0; border-radius: 14px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--akzent) 55%, transparent); }
+.slot.treffer .fenster .rahmen { box-shadow: inset 0 0 0 3px var(--akzent), 0 0 24px color-mix(in srgb, var(--akzent) 60%, transparent); animation: glimmen 1.4s ease-in-out 2; }
+@keyframes glimmen { 50% { box-shadow: inset 0 0 0 3px #FFF1C2, 0 0 40px var(--akzent); } }
+.konfetti { pointer-events: none; position: absolute; inset: -20px 0 0 0; overflow: visible; }
+.konfetti i { position: absolute; left: var(--x); top: 0; width: 7px; height: 11px; background: var(--c); border-radius: 2px; opacity: 0; animation: fallen var(--d) ease-in var(--v) forwards; }
+@keyframes fallen { 0% { opacity: 1; transform: translateY(0) rotate(0); } 100% { opacity: 0; transform: translateY(340px) rotate(var(--r)); } }
 .zufall-ergebnis { text-align: center; margin-top: 14px; }
 .zufall-ergebnis h2 { font-size: 22px; }
 .zufall-ergebnis .u { color: var(--fg3); font-size: 14px; margin: 4px 0 12px; }
+.ton { display: block; margin: 10px auto 0; background: none; border: 0; color: var(--fg3); font-size: 12px; font-weight: 600; }
 .wuerfel { margin: 18px auto 0; display: block; }
 
 /* Login */
@@ -191,3 +210,28 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 .fehlt { color: var(--rot); font-weight: 600; font-size: 13px; }
 .lade { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--akzent); border-radius: 999px; animation: dreh .8s linear infinite; vertical-align: middle; }
 @keyframes dreh { to { transform: rotate(360deg); } }
+
+/* Umschalter Alle Filme / Rangliste */
+.umschalter { display: flex; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 3px; margin: 0 0 12px; }
+.umschalter button { flex: 1; background: none; border: 0; border-radius: 9px; padding: 8px; font-size: 13px; font-weight: 600; color: var(--fg3); }
+.umschalter button[aria-pressed="true"] { background: var(--bg); color: var(--fg); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+
+/* Rangliste */
+.rang { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rang-zeile { display: flex; align-items: center; gap: 10px; background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 8px 12px 8px 8px; cursor: pointer; }
+.rang-zeile .platz { width: 30px; text-align: center; font-weight: 800; font-size: 17px; color: var(--fg3); flex: 0 0 auto; }
+.rang-zeile.top .platz { color: var(--akzent); font-size: 20px; }
+.rang-zeile .plakat { width: 44px; flex: 0 0 auto; }
+.rang-zeile .inhalt { flex: 1; min-width: 0; }
+.rang-zeile h3 { font-size: 15px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rang-zeile .u { color: var(--fg3); font-size: 12px; margin-top: 2px; }
+.rang-zeile .einzel { display: flex; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--fg2); }
+.rang-zeile .punkte { font-size: 20px; color: var(--akzent); flex: 0 0 auto; }
+
+/* Geschaut mit */
+.mit { margin-top: 10px; }
+.mit > span { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg3); font-weight: 700; margin-bottom: 4px; }
+.mit .chips { padding: 0; }
+.mit .chip { padding: 5px 11px; font-size: 12px; }
+.mit .chip.plus { border-style: dashed; color: var(--fg3); }
+.mit-info { color: var(--fg3); font-size: 13px; margin-top: 2px; }

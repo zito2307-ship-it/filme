@@ -5,7 +5,9 @@
   const IMG = "https://image.tmdb.org/t/p/";
   const S = { session: null, user: null, profile: [], filme: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
     genre: { watchlist: null, gesehen: null, zufall: new Set(), fuerdich: null }, sort: { watchlist: "neu", gesehen: "neu" },
-    suche: "", ergebnisse: null, beliebt: null, empfehlungen: null, zufall: { quelle: "watchlist", max: 0, ergebnis: null, dreht: false } };
+    suche: "", ergebnisse: null, beliebt: null, empfehlungen: null, empfBasis: "alle",
+    ansicht: "raster", rang: { wer: "beide", nur: "alle" },
+    zufall: { quelle: "watchlist", max: 0, ergebnis: null, dreht: false, ton: localStorage.getItem("filmabend-ton") !== "aus" } };
 
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const heute = () => new Date().toISOString().slice(0, 10);
@@ -81,6 +83,20 @@
   /* ---------- Hilfen für Filme ---------- */
   const eigeneWertung = (f, uid) => (f.bewertungen || []).find(b => b.user_id === uid);
   function schnitt(f) { const b = f.bewertungen || []; return b.length ? b.reduce((s, x) => s + x.punkte, 0) / b.length : null; }
+  const andereProfile = () => S.profile.filter(p => p.id !== S.user.id);
+  const mitTokens = b => Array.isArray(b && b.mit) ? b.mit : [];
+  // „gemeinsam geschaut“ = jemand hat bei seiner Bewertung einen anderen App-Nutzer angegeben
+  const gemeinsam = f => (f.bewertungen || []).some(b => mitTokens(b).some(x => x.startsWith("@") && x.slice(1) !== b.user_id));
+  function mitText(b) {
+    const m = mitTokens(b); if (!m.length) return "";
+    if (m.includes("allein")) return "allein geschaut";
+    return "mit " + m.map(x => x.startsWith("@") ? nameVon(x.slice(1)) : x).join(", ") + " geschaut";
+  }
+  function bekannteNamen() {
+    const s = new Set();
+    S.filme.forEach(f => (f.bewertungen || []).forEach(b => mitTokens(b).forEach(x => { if (x !== "allein" && !x.startsWith("@")) s.add(x); })));
+    return [...s].sort((a, b) => a.localeCompare(b, "de"));
+  }
   function genresVon(filme) { const m = new Map(); filme.forEach(f => (f.genres || []).forEach(g => m.set(g, (m.get(g) || 0) + 1))); return [...m.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]); }
   function sortiere(filme, art) {
     const l = [...filme];
@@ -112,19 +128,55 @@
     const sortOpts = status === "watchlist" ? [["neu", "Zuletzt eingetragen"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]]
       : [["gesehen", "Zuletzt gesehen"], ["wertung", "Unsere Wertung"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]];
     if (!S.sort[status] || !sortOpts.some(o => o[0] === S.sort[status])) S.sort[status] = sortOpts[0][0];
+    const rang = status === "gesehen" && S.ansicht === "rangliste";
     view.innerHTML = `<div class="kopf"><h1>${titel}</h1><p>${alle.length} ${alle.length === 1 ? "Film" : "Filme"}${status === "watchlist" ? " zum Schauen" : ""}</p></div>
       ${schluesselHinweis()}
+      ${status === "gesehen" && alle.length ? `<div class="umschalter"><button data-a="raster" aria-pressed="${!rang}" type="button">Alle Filme</button><button data-a="rangliste" aria-pressed="${rang}" type="button">Rangliste</button></div>` : ""}
+      ${rang ? ranglisteHTML(alle) : `
       ${genres.length > 1 ? `<div class="chips"><button class="chip" data-g="" aria-pressed="${!g}">Alle</button>${genres.map(x => `<button class="chip" data-g="${esc(x)}" aria-pressed="${g === x}">${esc(x)}</button>`).join("")}</div>` : ""}
       ${alle.length ? `<div class="werkzeug"><span>${liste.length} angezeigt</span><select id="sort">${sortOpts.map(o => `<option value="${o[0]}" ${S.sort[status] === o[0] ? "selected" : ""}>${o[1]}</option>`).join("")}</select></div>` : ""}
       ${liste.length ? `<div class="raster">${liste.map(karte).join("")}</div>`
-        : `<div class="empty"><b>${status === "watchlist" ? "Noch nichts auf der Watchlist" : "Noch nichts gesehen"}</b>${status === "watchlist" ? "Über „Suchen“ Filme eintragen." : "Markiere einen Film als gesehen, dann könnt ihr ihn bewerten."}</div>`}`;
+        : `<div class="empty"><b>${status === "watchlist" ? "Noch nichts auf der Watchlist" : "Noch nichts gesehen"}</b>${status === "watchlist" ? "Über „Suchen“ Filme eintragen." : "Markiere einen Film als gesehen, dann könnt ihr ihn bewerten."}</div>`}`}`;
     hinweisBinden();
+    view.querySelectorAll(".umschalter button").forEach(b => b.onclick = () => { S.ansicht = b.dataset.a; renderListe(status); });
+    if (rang) { ranglisteBinden(status); return; }
     view.querySelectorAll(".chip").forEach(c => c.onclick = () => { S.genre[status] = c.dataset.g || null; renderListe(status); });
     const sel = $("#sort"); if (sel) sel.onchange = () => { S.sort[status] = sel.value; renderListe(status); };
     kartenBinden();
   }
 
-  /* ---------- Zufall ---------- */
+  /* ---------- Rangliste ---------- */
+  function rangWert(f) { return S.rang.wer === "beide" ? schnitt(f) : (eigeneWertung(f, S.rang.wer) || {}).punkte; }
+  function ranglisteHTML(alle) {
+    const r = S.rang; if (r.wer !== "beide" && !S.profile.some(p => p.id === r.wer)) r.wer = "beide";
+    const basis = r.nur === "gemeinsam" ? alle.filter(gemeinsam) : alle;
+    const liste = basis.map(f => ({ f, w: rangWert(f) })).filter(x => x.w != null).sort((a, b) => b.w - a.w || (b.f.gesehen_am || "").localeCompare(a.f.gesehen_am || ""));
+    const leer = r.nur === "gemeinsam" && !basis.length ? "Noch kein Film ist als „gemeinsam geschaut“ markiert. Das geht bei der Bewertung unter „Geschaut“."
+      : r.wer === "beide" ? "Bewertet gesehene Filme, dann entsteht hier eure Top-Liste." : nameVon(r.wer) + " hat noch nichts bewertet.";
+    return `<div class="chips"><button class="chip" data-w="beide" aria-pressed="${r.wer === "beide"}">Zusammen</button>${S.profile.map(p => `<button class="chip" data-w="${p.id}" aria-pressed="${r.wer === p.id}">${esc(p.name)}</button>`).join("")}</div>
+      <div class="chips"><button class="chip" data-n="alle" aria-pressed="${r.nur === "alle"}">Alle gesehenen</button><button class="chip" data-n="gemeinsam" aria-pressed="${r.nur === "gemeinsam"}">Gemeinsam geschaut</button></div>
+      ${liste.length ? `<ol class="rang">${liste.map((x, i) => rangZeile(x.f, x.w, i + 1)).join("")}</ol>` : `<div class="empty"><b>Noch keine Rangliste</b>${leer}</div>`}`;
+  }
+  function rangZeile(f, w, platz) {
+    const bew = f.bewertungen || [];
+    const einzel = S.rang.wer === "beide" && bew.length > 1 ? bew.map(b => `<span>${esc(nameVon(b.user_id))} ${pkt(b.punkte)}</span>`).join("") : "";
+    const nurEiner = S.rang.wer === "beide" && bew.length === 1 && S.profile.length > 1 ? `nur ${esc(nameVon(bew[0].user_id))}` : "";
+    const mit = S.rang.wer === "beide"
+      ? (gemeinsam(f) ? "gemeinsam geschaut" : bew.filter(b => mitTokens(b).length).map(b => esc(nameVon(b.user_id)) + " " + esc(mitText(b))).join(" · "))
+      : esc(mitText(eigeneWertung(f, S.rang.wer)));
+    const u = [f.jahr, (f.genres || [])[0]].filter(Boolean).map(esc).join(" · ");
+    return `<li class="rang-zeile${platz <= 3 ? " top" : ""}" data-id="${f.id}"><span class="platz">${platz}</span>
+      <div class="plakat">${f.poster ? `<img src="${bild(f.poster, "w185")}" alt="" loading="lazy">` : `<div class="ohne">${esc(f.titel)}</div>`}</div>
+      <div class="inhalt"><h3>${esc(f.titel)}</h3><div class="u">${[u, mit, nurEiner].filter(Boolean).join(" · ")}</div>${einzel ? `<div class="einzel">${einzel}</div>` : ""}</div>
+      <b class="punkte">${pkt(w)}</b></li>`;
+  }
+  function ranglisteBinden(status) {
+    view.querySelectorAll(".chip[data-w]").forEach(c => c.onclick = () => { S.rang.wer = c.dataset.w; renderListe(status); });
+    view.querySelectorAll(".chip[data-n]").forEach(c => c.onclick = () => { S.rang.nur = c.dataset.n; renderListe(status); });
+    view.querySelectorAll(".rang-zeile").forEach(z => z.onclick = () => { const f = S.filme.find(x => x.id === z.dataset.id); if (f) oeffneFilm(f); });
+  }
+
+  /* ---------- Zufall: Spielautomat ---------- */
   function zufallKandidaten() {
     const z = S.zufall;
     return S.filme.filter(f => (z.quelle === "alle" || f.status === "watchlist")
@@ -135,7 +187,7 @@
     const z = S.zufall; const genres = genresVon(S.filme.filter(f => z.quelle === "alle" || f.status === "watchlist"));
     [...S.genre.zufall].forEach(g => { if (!genres.includes(g)) S.genre.zufall.delete(g); });
     const kand = zufallKandidaten(); const e = z.ergebnis && kand.find(f => f.id === z.ergebnis.id) ? z.ergebnis : null;
-    view.innerHTML = `<div class="kopf"><h1>Zufall</h1><p>Keine Ahnung, was ihr schauen wollt? Lasst würfeln.</p></div>
+    view.innerHTML = `<div class="kopf"><h1>Zufall</h1><p>Keine Ahnung, was ihr schauen wollt? Der Automat entscheidet.</p></div>
       <div class="chips">
         <button class="chip" data-q="watchlist" aria-pressed="${z.quelle === "watchlist"}">Nur Watchlist</button>
         <button class="chip" data-q="alle" aria-pressed="${z.quelle === "alle"}">Auch Gesehene</button>
@@ -143,40 +195,93 @@
       ${genres.length > 1 ? `<div class="chips">${genres.map(x => `<button class="chip" data-g="${esc(x)}" aria-pressed="${S.genre.zufall.has(x)}">${esc(x)}</button>`).join("")}</div>` : ""}
       <div class="werkzeug"><span>${kand.length} ${kand.length === 1 ? "Film" : "Filme"} im Topf</span>
         <select id="max"><option value="0" ${!z.max ? "selected" : ""}>Länge egal</option><option value="100" ${z.max === 100 ? "selected" : ""}>bis 100 min</option><option value="120" ${z.max === 120 ? "selected" : ""}>bis 2 Std.</option><option value="150" ${z.max === 150 ? "selected" : ""}>bis 2,5 Std.</option></select></div>
-      <div class="zufall-buehne" id="buehne"><div class="plakat">${e && e.poster ? `<img src="${bild(e.poster, "w342")}" alt="">` : `<div class="ohne">${e ? esc(e.titel) : "?"}</div>`}</div></div>
+      <div class="slot${e ? " treffer" : ""}" id="slot">
+        <div class="lampen oben" aria-hidden="true">${lampen()}</div>
+        <div class="fenster" id="fenster"><div class="band ruhe" id="band">${reelItem(e, true)}</div><div class="rahmen"></div></div>
+        <div class="lampen unten" aria-hidden="true">${lampen()}</div>
+      </div>
       <div class="zufall-ergebnis" id="ergebnis">${e ? ergebnisHTML(e) : ""}</div>
-      <button class="btn primary wuerfel" id="wuerfeln" ${kand.length ? "" : "disabled"}>${ICON.zufall} ${e ? "Nochmal würfeln" : "Würfeln"}</button>`;
-    view.querySelectorAll(".chip[data-q]").forEach(c => c.onclick = () => { z.quelle = c.dataset.q; renderZufall(); });
-    view.querySelectorAll(".chip[data-g]").forEach(c => c.onclick = () => { const g = c.dataset.g; if (S.genre.zufall.has(g)) S.genre.zufall.delete(g); else S.genre.zufall.add(g); renderZufall(); });
-    $("#max").onchange = ev => { z.max = parseInt(ev.target.value) || 0; renderZufall(); };
+      <button class="btn primary wuerfel" id="wuerfeln" ${kand.length ? "" : "disabled"}>${ICON.zufall} ${e ? "Nochmal drehen" : "Drehen"}</button>
+      <button class="ton" id="ton" type="button" aria-pressed="${z.ton}">${z.ton ? "🔊 Ton an" : "🔇 Ton aus"}</button>`;
+    view.querySelectorAll(".chip[data-q]").forEach(c => c.onclick = () => { if (z.dreht) return; z.quelle = c.dataset.q; renderZufall(); });
+    view.querySelectorAll(".chip[data-g]").forEach(c => c.onclick = () => { if (z.dreht) return; const g = c.dataset.g; if (S.genre.zufall.has(g)) S.genre.zufall.delete(g); else S.genre.zufall.add(g); renderZufall(); });
+    $("#max").onchange = ev => { if (z.dreht) { ev.target.value = z.max; return; } z.max = parseInt(ev.target.value) || 0; renderZufall(); };
     $("#wuerfeln").onclick = wuerfeln;
+    $("#ton").onclick = () => { z.ton = !z.ton; localStorage.setItem("filmabend-ton", z.ton ? "an" : "aus"); const b = $("#ton"); b.setAttribute("aria-pressed", z.ton); b.textContent = z.ton ? "🔊 Ton an" : "🔇 Ton aus"; if (z.ton) ton("tick"); };
     const d = $("#details-zufall"); if (d) d.onclick = () => oeffneFilm(e);
   }
+  const lampen = () => Array.from({ length: 9 }, (_, i) => `<i style="--i:${i}"></i>`).join("");
+  const reelItem = (f, aktiv) => `<div class="reel-item${aktiv ? " aktiv" : ""}"><div class="plakat">${f && f.poster ? `<img src="${bild(f.poster, "w342")}" alt="">` : `<div class="ohne">${f ? esc(f.titel) : "?"}</div>`}</div></div>`;
   function ergebnisHTML(f) {
     return `<h2>${esc(f.titel)}</h2><div class="u">${[f.jahr, f.laufzeit ? f.laufzeit + " min" : null, (f.genres || []).slice(0, 2).join(", ")].filter(Boolean).join(" · ")}${f.imdb_rating ? ` · IMDb ${f.imdb_rating}` : ""}</div>
       <div class="reihe" style="justify-content:center"><button class="btn" id="details-zufall">Details & Trailer</button></div>`;
   }
+  // Töne über WebAudio – kein Download, nur kurze Klicks und eine kleine Fanfare
+  let audio;
+  function ton(art) {
+    if (!S.zufall.ton) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") audio.resume();
+      const t = audio.currentTime;
+      const note = (freq, start, dauer, laut, typ) => { const o = audio.createOscillator(), g = audio.createGain(); o.type = typ; o.frequency.value = freq; g.gain.setValueAtTime(0.0001, start); g.gain.exponentialRampToValueAtTime(laut, start + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, start + dauer); o.connect(g).connect(audio.destination); o.start(start); o.stop(start + dauer + 0.05); };
+      if (art === "tick") note(1500 + Math.random() * 300, t, 0.045, 0.05, "square");
+      else [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => note(f, t + i * 0.11, i === 3 ? 0.7 : 0.3, 0.16, "triangle"));
+    } catch { /* kein Ton möglich – egal */ }
+  }
+  function konfetti(el) {
+    const farben = ["#E8B458", "#FFF1C2", "#E06B6B", "#6FA3E8", "#5FB87A", "#F5C518"];
+    el.insertAdjacentHTML("beforeend", `<div class="konfetti" aria-hidden="true">${Array.from({ length: 36 }, (_, i) => `<i style="--x:${Math.random() * 100}%;--d:${(0.9 + Math.random() * 0.9).toFixed(2)}s;--v:${(Math.random() * 0.4).toFixed(2)}s;--r:${Math.round(Math.random() * 720 - 360)}deg;--c:${farben[i % farben.length]}"></i>`).join("")}</div>`);
+    setTimeout(() => { const k = $(".konfetti", el); if (k) k.remove(); }, 2600);
+  }
   function wuerfeln() {
     const kand = zufallKandidaten(); if (!kand.length || S.zufall.dreht) return;
-    const buehne = $("#buehne"), erg = $("#ergebnis"), btn = $("#wuerfeln");
-    S.zufall.dreht = true; buehne.classList.add("dreht"); btn.disabled = true; erg.innerHTML = "";
+    const z = S.zufall, slot = $("#slot"), fenster = $("#fenster"), band = $("#band"), erg = $("#ergebnis"), btn = $("#wuerfeln");
+    z.dreht = true; z.ergebnis = null; slot.classList.remove("treffer"); slot.classList.add("dreht"); btn.disabled = true; btn.innerHTML = '<span class="lade"></span> Dreht …'; erg.innerHTML = "";
     const ziel = kand[Math.floor(Math.random() * kand.length)];
-    let schritte = Math.min(18, 6 + kand.length * 2), i = 0, warte = 60;
-    const tick = () => {
-      const f = i < schritte - 1 ? kand[Math.floor(Math.random() * kand.length)] : ziel;
-      buehne.innerHTML = `<div class="plakat">${f.poster ? `<img src="${bild(f.poster, "w342")}" alt="">` : `<div class="ohne">${esc(f.titel)}</div>`}</div>`;
-      i++;
-      if (i < schritte) { warte = Math.round(warte * 1.18); setTimeout(tick, warte); }
-      else { S.zufall.dreht = false; S.zufall.ergebnis = ziel; buehne.classList.remove("dreht"); erg.innerHTML = ergebnisHTML(ziel); btn.disabled = false; btn.innerHTML = ICON.zufall + " Nochmal würfeln"; $("#details-zufall").onclick = () => oeffneFilm(ziel); }
+    // Dauer zufällig 5–10 s; Schritte werden geometrisch langsamer (70 ms → ~480 ms)
+    const dauer = 5000 + Math.random() * 5000, d0 = 70, dn = 480;
+    const r = 1 + d0 * (dn / d0 - 1) / dauer, n = Math.max(12, Math.round(Math.log(dn / d0) / Math.log(r)));
+    const zufaellig = vorher => { if (kand.length === 1) return kand[0]; let f; do { f = kand[Math.floor(Math.random() * kand.length)]; } while (f === vorher); return f; };
+    const filme = [zufaellig(null)]; // Index 0 = Nachbar oben
+    for (let i = 0; i < n; i++) filme.push(zufaellig(filme[filme.length - 1]));
+    filme[filme.length - 1] = ziel; if (n > 1 && filme[n - 1] === ziel) filme[n - 1] = zufaellig(ziel);
+    filme.push(zufaellig(ziel), zufaellig(null));
+    band.classList.remove("ruhe"); band.style.transition = "none";
+    band.innerHTML = filme.map((f, i) => reelItem(f, i === 1)).join("");
+    const ih = band.children[0].offsetHeight, fh = Math.round(ih * 1.7);
+    fenster.style.height = fh + "px";
+    const pos = c => `translateY(${Math.round((fh - ih) / 2 - c * ih)}px)`;
+    band.style.transform = pos(1);
+    void band.offsetHeight; // Layout erzwingen, damit die erste Transition greift
+    let i = 1, warte = d0;
+    const schritt = () => {
+      i++; const letzter = i === n; // Index n ist der Gewinnerfilm
+      warte = letzter ? 600 : Math.min(dn, Math.round(warte * r));
+      band.style.transition = `transform ${warte}ms ${letzter ? "cubic-bezier(.22,1.35,.45,1)" : warte < 160 ? "linear" : "ease-out"}`;
+      band.style.transform = pos(i);
+      band.querySelectorAll(".reel-item").forEach((el, k) => el.classList.toggle("aktiv", k === i));
+      ton("tick");
+      if (!letzter) setTimeout(schritt, warte);
+      else setTimeout(() => {
+        band.style.transition = "none"; band.style.transform = pos(n); // sicher auf dem Gewinner einrasten
+        z.dreht = false; z.ergebnis = ziel; slot.classList.remove("dreht"); slot.classList.add("treffer");
+        ton("fanfare"); konfetti(slot);
+        erg.innerHTML = ergebnisHTML(ziel); btn.disabled = false; btn.innerHTML = ICON.zufall + " Nochmal drehen";
+        $("#details-zufall").onclick = () => oeffneFilm(ziel);
+      }, warte + 80);
     };
-    tick();
+    setTimeout(schritt, 120);
   }
 
   /* ---------- Für uns (Empfehlungen) ---------- */
-  function seeds() {
+  function seeds(basis) {
     const out = [];
     for (const f of S.filme) {
-      const s = schnitt(f); let gewicht;
+      const meine = eigeneWertung(f, S.user.id);
+      if (basis === "gemeinsam" && !(f.status === "gesehen" && gemeinsam(f))) continue;
+      if (basis === "meine" && !(meine || (f.status === "watchlist" && f.hinzugefuegt_von === S.user.id))) continue;
+      const s = basis === "meine" && meine ? meine.punkte : schnitt(f); let gewicht;
       if (f.status === "gesehen") { if (s == null) gewicht = 1; else if (s >= 8) gewicht = 3; else if (s >= 6) gewicht = 1.5; else continue; }
       else gewicht = 0.8;
       out.push({ tmdb_id: f.tmdb_id, gewicht, titel: f.titel });
@@ -184,25 +289,30 @@
     return out;
   }
   async function renderFuerDich() {
-    view.innerHTML = `<div class="kopf"><h1>Für uns</h1><p>Vorschläge auf Basis eurer Filme und Bewertungen.</p></div>${schluesselHinweis()}<div id="inhalt"><div class="empty"><span class="lade"></span></div></div>`;
+    const basen = [["alle", "Alle unsere Filme"], ["gemeinsam", "Gemeinsam geschaut"], ["meine", "Nur meine"]];
+    const basisChips = S.filme.length ? `<div class="chips">${basen.map(b => `<button class="chip" data-b="${b[0]}" aria-pressed="${S.empfBasis === b[0]}">${b[1]}</button>`).join("")}</div>` : "";
+    view.innerHTML = `<div class="kopf"><h1>Für uns</h1><p>Vorschläge auf Basis eurer Filme und Bewertungen.</p></div>${schluesselHinweis()}${basisChips}<div id="inhalt"><div class="empty"><span class="lade"></span></div></div>`;
     hinweisBinden();
+    view.querySelectorAll(".chip[data-b]").forEach(c => c.onclick = () => { S.empfBasis = c.dataset.b; renderFuerDich(); });
     if (!S.keys.tmdb) { $("#inhalt").innerHTML = ""; return; }
-    const sd = seeds();
+    const basis = S.empfBasis, sd = seeds(basis);
     try {
-      if (!S.empfehlungen) {
-        const r = sd.length ? await Store.film("empfehlungen", { seeds: sd, ausschluss: S.filme.map(f => f.tmdb_id) }) : await Store.film("beliebt");
-        S.empfehlungen = { basis: sd.length ? "eure" : "beliebt", filme: r.filme || [] };
+      if (!S.empfehlungen || S.empfehlungen.basis !== basis) {
+        const r = sd.length ? await Store.film("empfehlungen", { seeds: sd, ausschluss: S.filme.map(f => f.tmdb_id) }) : (basis === "alle" ? await Store.film("beliebt") : { filme: [] });
+        S.empfehlungen = { basis, quelle: sd.length ? "eure" : "beliebt", filme: r.filme || [] };
       }
     } catch (x) { $("#inhalt").innerHTML = `<div class="empty"><b>Keine Vorschläge</b>${esc(fehlerText(x))}</div>`; return; }
-    if (S.tab !== "fuerdich") return;
+    if (S.tab !== "fuerdich" || S.empfehlungen.basis !== basis) return;
     const vorhanden = new Set(S.filme.map(f => f.tmdb_id));
     const alle = S.empfehlungen.filme.filter(f => !vorhanden.has(f.tmdb_id));
     const genres = genresVon(alle); const g = S.genre.fuerdich && genres.includes(S.genre.fuerdich) ? S.genre.fuerdich : null;
     const liste = g ? alle.filter(f => f.genres.includes(g)) : alle;
-    $("#inhalt").innerHTML = `${S.empfehlungen.basis === "beliebt" ? `<div class="hinweis">Ihr habt noch keine Filme eingetragen – darum erst mal, was gerade beliebt ist. Sobald ihr Filme bewertet, wird es persönlich.</div>` : ""}
+    const leer = basis === "gemeinsam" ? "Markiert bei der Bewertung, mit wem ihr geschaut habt – dann gibt es hier Vorschläge auf Basis eurer gemeinsamen Filme."
+      : basis === "meine" ? "Bewerte ein paar Filme, dann gibt es Vorschläge nur für dich." : "Bewertet ein paar Filme, dann gibt es Vorschläge.";
+    $("#inhalt").innerHTML = `${S.empfehlungen.quelle === "beliebt" ? `<div class="hinweis">Ihr habt noch keine Filme eingetragen – darum erst mal, was gerade beliebt ist. Sobald ihr Filme bewertet, wird es persönlich.</div>` : ""}
       ${genres.length > 1 ? `<div class="chips"><button class="chip" data-g="" aria-pressed="${!g}">Alle</button>${genres.map(x => `<button class="chip" data-g="${esc(x)}" aria-pressed="${g === x}">${esc(x)}</button>`).join("")}</div>` : ""}
-      ${liste.length ? `<div class="liste">${liste.map(zeile).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>Bewertet ein paar Filme, dann gibt es Vorschläge.</div>`}`;
-    view.querySelectorAll(".chip").forEach(c => c.onclick = () => { S.genre.fuerdich = c.dataset.g || null; renderFuerDich(); });
+      ${liste.length ? `<div class="liste">${liste.map(zeile).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>${leer}</div>`}`;
+    view.querySelectorAll(".chip[data-g]").forEach(c => c.onclick = () => { S.genre.fuerdich = c.dataset.g || null; renderFuerDich(); });
     zeilenBinden(alle);
   }
   function zeile(f) {
@@ -290,9 +400,10 @@
     try { await Store.filmLoeschen(f.id); S.filme = S.filme.filter(x => x.id !== f.id); S.empfehlungen = null; sheet.innerHTML = ""; toast("Entfernt"); render(); }
     catch (x) { toast("Löschen fehlgeschlagen: " + x.message); }
   }
-  async function bewerten(f, punkte, kommentar) {
+  async function bewerten(f, punkte, kommentar, mit) {
     try {
-      const b = await Store.bewerten(f.id, S.user.id, punkte, kommentar);
+      const alt = eigeneWertung(f, S.user.id);
+      const b = await Store.bewerten(f.id, S.user.id, punkte, kommentar, mit || mitTokens(alt));
       f.bewertungen = (f.bewertungen || []).filter(x => x.user_id !== S.user.id).concat([b]); S.empfehlungen = null;
       return b;
     } catch (x) { toast("Bewertung nicht gespeichert: " + x.message); }
@@ -374,10 +485,17 @@
     return `<div class="bewertung-box"><div class="wer"><span>${esc((ich() || {}).name || "Ich")}</span><b id="meine-punkte">${meine ? pkt(meine.punkte) + "/10" : "noch offen"}</b></div>
         <div class="sterne" id="sterne">${ganze}</div>
         <div class="sterne dez" id="dezimale">${dezimale}</div>
+        <div class="mit"><span>Geschaut</span><div class="chips" id="mit">${mitChips(meine)}</div></div>
         <textarea id="kommentar" placeholder="Kurzer Kommentar (optional)">${esc(meine ? meine.kommentar || "" : "")}</textarea>
         <div class="reihe" style="margin-top:8px;justify-content:flex-end"><button class="btn klein" id="kommentar-speichern" type="button">Kommentar speichern</button></div></div>
-      ${andere.map(b => `<div class="bewertung-box"><div class="wer"><span>${esc(nameVon(b.user_id))}</span><b>${pkt(b.punkte)}/10</b></div>${b.kommentar ? `<div class="kommentar">„${esc(b.kommentar)}“</div>` : ""}</div>`).join("")}
+      ${andere.map(b => `<div class="bewertung-box"><div class="wer"><span>${esc(nameVon(b.user_id))}</span><b>${pkt(b.punkte)}/10</b></div>${mitText(b) ? `<div class="mit-info">${esc(mitText(b))}</div>` : ""}${b.kommentar ? `<div class="kommentar">„${esc(b.kommentar)}“</div>` : ""}</div>`).join("")}
       ${S.profile.filter(p => p.id !== S.user.id && !andere.some(b => b.user_id === p.id)).map(p => `<div class="bewertung-box"><div class="wer"><span>${esc(p.name)}</span><span style="color:var(--fg3)">hat noch nicht bewertet</span></div></div>`).join("")}`;
+  }
+  function mitChips(meine) {
+    const m = mitTokens(meine);
+    const chip = (tok, text) => `<button class="chip" type="button" data-m="${esc(tok)}" aria-pressed="${m.includes(tok)}">${esc(text)}</button>`;
+    return chip("allein", "Allein") + andereProfile().map(p => chip("@" + p.id, "Mit " + p.name)).join("") + bekannteNamen().map(n => chip(n, "Mit " + n)).join("")
+      + `<button class="chip plus" type="button" data-m="+">+ Name</button>`;
   }
   function bewertungBinden(f, p) {
     const st = $("#sterne", p), dz = $("#dezimale", p); if (!st) return;
@@ -401,6 +519,17 @@
       const meine = eigeneWertung(f, S.user.id); if (!meine) { toast("Erst die ganze Zahl wählen."); return; }
       speichere(Math.floor(meine.punkte) + parseInt(b.dataset.d) / 10);
     });
+    const mitBinden = () => $("#mit", p).querySelectorAll(".chip").forEach(c => c.onclick = async () => {
+      const meine = eigeneWertung(f, S.user.id); if (!meine) { toast("Erst Punkte vergeben."); return; }
+      let m = mitTokens(meine).slice(); const tok = c.dataset.m;
+      if (tok === "+") {
+        const name = (prompt("Mit wem geschaut? (Name)") || "").trim().replace(/^mit\s+/i, "");
+        if (!name) return; if (!m.includes(name)) m.push(name); m = m.filter(x => x !== "allein");
+      } else if (tok === "allein") m = m.includes("allein") ? [] : ["allein"];
+      else { m = m.includes(tok) ? m.filter(x => x !== tok) : m.concat([tok]); m = m.filter(x => x !== "allein"); }
+      if (await bewerten(f, meine.punkte, $("#kommentar", p).value.trim(), m)) { $("#mit", p).innerHTML = mitChips(eigeneWertung(f, S.user.id)); mitBinden(); toast(m.length ? "Gespeichert: " + mitText({ mit: m }) : "Angabe entfernt"); }
+    });
+    mitBinden();
     $("#kommentar-speichern", p).onclick = async () => {
       const meine = eigeneWertung(f, S.user.id); if (!meine) { toast("Erst Punkte vergeben."); return; }
       if (await bewerten(f, meine.punkte, $("#kommentar", p).value.trim())) toast("Kommentar gespeichert");

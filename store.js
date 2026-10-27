@@ -24,8 +24,8 @@ window.Store = (function () {
     async filmAnlegen(daten) { return pruefe(await sb.from("filme").insert(daten).select("*").single()); },
     async filmAendern(id, daten) { return pruefe(await sb.from("filme").update(daten).eq("id", id).select("*").single()); },
     async filmLoeschen(id) { pruefe(await sb.from("filme").delete().eq("id", id)); },
-    async bewerten(film_id, user_id, punkte, kommentar) {
-      return pruefe(await sb.from("bewertungen").upsert({ film_id, user_id, punkte, kommentar: kommentar || null }, { onConflict: "film_id,user_id" }).select("*").single());
+    async bewerten(film_id, user_id, punkte, kommentar, mit) {
+      return pruefe(await sb.from("bewertungen").upsert({ film_id, user_id, punkte, kommentar: kommentar || null, mit: Array.isArray(mit) ? mit : [] }, { onConflict: "film_id,user_id" }).select("*").single());
     },
     async bewertungLoeschen(film_id, user_id) { pruefe(await sb.from("bewertungen").delete().eq("film_id", film_id).eq("user_id", user_id)); },
 
