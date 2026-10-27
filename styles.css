@@ -351,3 +351,28 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
   .angebot-details { padding-left: 10px; }
 }
 .umschalter button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Personen folgen */
+.folgen { margin: 2px 0 10px; }
+.folgen > span { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg3); font-weight: 700; margin-bottom: 4px; }
+.folgen .chips { padding: 0 0 4px; }
+.folgen .chip.eigene { border-color: color-mix(in srgb, var(--akzent) 55%, transparent); color: var(--akzent); }
+.folgen-hinweis { color: var(--fg3); font-size: 13px; margin: 0 0 10px; }
+.person-kopf .text { min-width: 0; }
+.person.gefolgt .foto { box-shadow: 0 0 0 2px var(--akzent); }
+.person.gefolgt .foto::after { content: "★"; position: absolute; right: -2px; bottom: -2px; width: 18px; height: 18px; border-radius: 999px; background: var(--akzent); color: var(--akzent-fg); font-size: 11px; display: flex; align-items: center; justify-content: center; }
+.person .foto { position: relative; overflow: visible; }
+.person .foto img { border-radius: 999px; }
+
+/* Bock-Wertung (Vorfreude) */
+.karte .bock { font-size: 11px; letter-spacing: 1px; margin-top: 2px; color: var(--line); }
+.karte .bock .voll { color: var(--akzent); }
+.bock-box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px 14px; margin-top: 10px; }
+.bock-box .wer { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; font-size: 14px; }
+.bock-box .wer small { color: var(--akzent); font-weight: 700; }
+.bock-sterne { display: flex; gap: 10px; margin-top: 8px; }
+.bock-sterne button { flex: 1; height: 44px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); font-size: 24px; color: var(--fg3); line-height: 1; }
+.bock-sterne button[aria-pressed="true"] { color: var(--akzent); border-color: color-mix(in srgb, var(--akzent) 50%, transparent); background: var(--akzent-weich); }
+.bock-andere { margin-top: 8px; font-size: 12px; color: var(--fg3); }
+.bock-andere b { color: var(--fg3); letter-spacing: 1px; }
+.bock-andere b .voll { color: var(--akzent); }

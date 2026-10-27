@@ -3,7 +3,7 @@
   const $ = (s, el) => (el || document).querySelector(s);
   const view = $("#view"), tabs = $("#tabs"), tablist = $("#tablist"), sheet = $("#sheet"), toastEl = $("#toast"), meBtn = $("#me");
   const IMG = "https://image.tmdb.org/t/p/";
-  const S = { session: null, user: null, profile: [], filme: [], serien: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
+  const S = { session: null, user: null, profile: [], filme: [], serien: [], folgen: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
     genre: { watchlist: null, gesehen: null, zufall: new Set(), fuerdich: null }, sort: { watchlist: "neu", gesehen: "neu" },
     suche: "", ergebnisse: null, personen: null, person: null, personSort: "beliebt", beliebt: null, empfCache: {}, empfVeraltet: false, empfBasis: "alle",
     ansicht: "raster", rang: { wer: "beide", nur: "alle" }, empfArt: "filme", personArt: "filme", wlAnsicht: "gemeinsam",
@@ -54,8 +54,8 @@
   async function laden() {
     S.user = S.session.user; view.innerHTML = '<div class="empty">Lädt …</div>';
     try {
-      const [profile, filme, serien, keys] = await Promise.all([Store.profile(), Store.filme(), Store.serien(), Store.schluesselStatus()]);
-      S.profile = profile; S.filme = filme; S.serien = serien; S.keys = keys || S.keys;
+      const [profile, filme, serien, folgen, keys] = await Promise.all([Store.profile(), Store.filme(), Store.serien(), Store.folgen().catch(() => []), Store.schluesselStatus()]);
+      S.profile = profile; S.filme = filme; S.serien = serien; S.folgen = folgen || []; S.keys = keys || S.keys;
     } catch (x) { view.innerHTML = `<div class="empty"><b>Daten konnten nicht geladen werden</b>${esc(x.message)}</div>`; return; }
     meBtn.textContent = (ich() || {}).name || "Ich"; meBtn.hidden = false; meBtn.onclick = einstellungen;
     tabs.hidden = false; renderTabs(); render();
@@ -101,13 +101,51 @@
   }
   const merklisteVon = (f, uid) => f.status === "merkliste" && f.hinzugefuegt_von === uid;
   const statusText = f => f.status === "gesehen" ? "✓ Schon gesehen" : f.status === "watchlist" ? "✓ Auf der Watchlist" : f.hinzugefuegt_von === S.user.id ? "✓ Auf deiner Merkliste" : `✓ Auf ${esc(nameVon(f.hinzugefuegt_von))}s Merkliste`;
-  const wegenText = w => w.startsWith("Serie: ") ? `Weil ihr die Serie „${esc(w.slice(7))}“ feiert` : w.startsWith("Film: ") ? `Weil ihr den Film „${esc(w.slice(6))}“ feiert` : `Weil ihr „${esc(w)}“ mögt`;
+  // Bock-Wertung (Vorfreude) 1–3 Sterne für Watchlist/Merkliste
+  const meinBock = f => ((f.vorfreude || []).find(v => v.user_id === S.user.id) || {}).sterne || 0;
+  const bockSchnitt = f => { const l = f.vorfreude || []; return l.length ? l.reduce((a, v) => a + v.sterne, 0) / l.length : null; };
+  const bockGewicht = f => { const b = bockSchnitt(f); return b == null ? 1 : b >= 2.5 ? 2 : b >= 1.5 ? 1.2 : 0.6; };
+  const sterneHTML = (n, max = 3) => Array.from({ length: max }, (_, i) => `<span class="${i < Math.round(n) ? "voll" : ""}">★</span>`).join("");
+  async function bockSetzen(f, sterne) {
+    try {
+      if (sterne === meinBock(f)) { await Store.vorfreudeLoeschen(f.id, S.user.id); f.vorfreude = (f.vorfreude || []).filter(v => v.user_id !== S.user.id); toast("Bock-Wertung entfernt"); }
+      else { const v = await Store.vorfreudeSetzen(f.id, S.user.id, sterne); f.vorfreude = (f.vorfreude || []).filter(x => x.user_id !== S.user.id).concat([v]); toast(["", "Na ja, kann man schauen", "Hab ich Bock drauf", "Riesen-Bock!"][sterne]); }
+      S.empfVeraltet = true; return true;
+    } catch (x) { toast("Nicht gespeichert: " + x.message); return false; }
+  }
+  function bockBoxHTML(f) {
+    const andere = (f.vorfreude || []).filter(v => v.user_id !== S.user.id);
+    return `<div class="bock-box"><div class="wer"><span>Wie viel Bock?</span><small>${["noch offen", "na ja", "Bock", "Riesen-Bock"][meinBock(f)]}</small></div>
+      <div class="bock-sterne" id="bock">${[1, 2, 3].map(n => `<button type="button" data-b="${n}" aria-pressed="${meinBock(f) >= n}" aria-label="${n} von 3">★</button>`).join("")}</div>
+      ${andere.length ? `<div class="bock-andere">${andere.map(v => `${esc(nameVon(v.user_id))}: <b>${sterneHTML(v.sterne)}</b>`).join(" · ")}</div>` : S.profile.length > 1 ? `<div class="bock-andere">${andereProfile().map(p => esc(p.name)).join(" & ")} noch nicht</div>` : ""}</div>`;
+  }
+  function bockBinden(f, p) {
+    const box = $("#bock", p); if (!box) return;
+    box.querySelectorAll("[data-b]").forEach(b => b.onclick = async () => { if (await bockSetzen(f, parseInt(b.dataset.b))) { box.parentElement.outerHTML = bockBoxHTML(f); bockBinden(f, p); render(); } });
+  }
+  const folgeIch = pid => S.folgen.some(f => f.person_id === pid && f.user_id === S.user.id);
+  const folgerVon = pid => S.folgen.filter(f => f.person_id === pid).map(f => f.user_id);
+  // Personen-Saat für Empfehlungen: je Folger Gewicht 2 (beide → 4); bei „Nur meine“ nur die eigenen
+  function personenSeeds(basis) {
+    const m = new Map();
+    for (const f of S.folgen) { if (basis === "meine" && f.user_id !== S.user.id) continue; const e = m.get(f.person_id) || { id: f.person_id, name: f.name, gewicht: 0 }; e.gewicht += 3; m.set(f.person_id, e); }
+    return [...m.values()];
+  }
+  async function folgenUmschalten(p) {
+    try {
+      if (folgeIch(p.id)) { await Store.entfolgen(p.id, S.user.id); S.folgen = S.folgen.filter(f => !(f.person_id === p.id && f.user_id === S.user.id)); toast(`Du folgst ${p.name} nicht mehr`); }
+      else { const n = await Store.folgenSetzen(p, S.user.id); S.folgen = S.folgen.filter(f => !(f.person_id === p.id && f.user_id === S.user.id)).concat([n]); toast(`Du folgst jetzt ${p.name}`); }
+      S.empfCache = {}; S.empfVeraltet = true; return true;
+    } catch (x) { toast("Nicht gespeichert: " + x.message); return false; }
+  }
+  const wegenText = w => w.startsWith("Person: ") ? `Weil ihr ${esc(w.slice(8))} folgt` : w.startsWith("Serie: ") ? `Weil ihr die Serie „${esc(w.slice(7))}“ feiert` : w.startsWith("Film: ") ? `Weil ihr den Film „${esc(w.slice(6))}“ feiert` : `Weil ihr „${esc(w)}“ mögt`;
   function genresVon(filme) { const m = new Map(); filme.forEach(f => (f.genres || []).forEach(g => m.set(g, (m.get(g) || 0) + 1))); return [...m.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]); }
   function sortiere(filme, art) {
     const l = [...filme];
     if (art === "titel") l.sort((a, b) => a.titel.localeCompare(b.titel, "de"));
     else if (art === "imdb") l.sort((a, b) => (b.imdb_rating || 0) - (a.imdb_rating || 0));
     else if (art === "letterboxd") l.sort((a, b) => (b.lb_rating || 0) - (a.lb_rating || 0));
+    else if (art === "bock") l.sort((a, b) => (bockSchnitt(b) || 0) - (bockSchnitt(a) || 0));
     else if (art === "jahr") l.sort((a, b) => (b.jahr || 0) - (a.jahr || 0));
     else if (art === "wertung") l.sort((a, b) => (schnitt(b) || 0) - (schnitt(a) || 0));
     else if (art === "gesehen") l.sort((a, b) => (b.gesehen_am || "").localeCompare(a.gesehen_am || ""));
@@ -119,7 +157,7 @@
       <div class="plakat">${f.poster ? `<img src="${bild(f.poster, "w342")}" alt="" loading="lazy">` : `<div class="ohne">${esc(f.titel)}</div>`}
         ${f.imdb_rating || f.lb_rating || f.rt_rating != null ? `<div class="leiste" title="IMDb · Letterboxd · Rotten Tomatoes"><span class="i">${f.imdb_rating ? "★ " + f.imdb_rating : ""}</span><span class="l">${f.lb_rating ? pkt(f.lb_rating) : ""}</span><span class="r">${f.rt_rating != null ? f.rt_rating + "%" : ""}</span></div>` : ""}
         ${eigene ? `<div class="eigene">${eigene}</div>` : ""}</div>
-      <div class="t">${esc(f.titel)}</div><div class="u">${f.jahr || ""}${f.genres && f.genres[0] ? " · " + esc(f.genres[0]) : ""}</div></button>`;
+      <div class="t">${esc(f.titel)}</div><div class="u">${f.jahr || ""}${f.genres && f.genres[0] ? " · " + esc(f.genres[0]) : ""}</div>${f.status !== "gesehen" && bockSchnitt(f) != null ? `<div class="bock" title="Bock-Wertung">${sterneHTML(bockSchnitt(f))}</div>` : ""}</button>`;
   }
   function kartenBinden(el) { (el || view).querySelectorAll(".karte[data-id]").forEach(b => b.onclick = () => { const f = S.filme.find(x => x.id === b.dataset.id); if (f) oeffneFilm(f); }); }
 
@@ -133,7 +171,7 @@
     const liste = sortiere(g ? alle.filter(f => f.genres.includes(g)) : alle, S.sort[status]);
     const titel = merk ? (merk === S.user.id ? "Meine Merkliste" : `${nameVon(merk)}s Merkliste`) : status === "watchlist" ? "Watchlist" : "Gesehen";
     const wlUmschalter = status === "watchlist" ? `<div class="umschalter"><button data-wl="gemeinsam" aria-pressed="${!merk}" type="button">Gemeinsam</button><button data-wl="${S.user.id}" aria-pressed="${merk === S.user.id}" type="button">Meine Merkliste</button>${andereProfile().map(p => `<button data-wl="${p.id}" aria-pressed="${merk === p.id}" type="button">${esc(p.name)}s</button>`).join("")}</div>` : "";
-    const sortOpts = status === "watchlist" ? [["neu", "Zuletzt eingetragen"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]]
+    const sortOpts = status === "watchlist" ? [["neu", "Zuletzt eingetragen"], ["bock", "Meiste Lust"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]]
       : [["gesehen", "Zuletzt gesehen"], ["wertung", "Unsere Wertung"], ["titel", "Titel"], ["imdb", "IMDb-Wertung"], ["letterboxd", "Letterboxd"], ["jahr", "Jahr"]];
     if (!S.sort[status] || !sortOpts.some(o => o[0] === S.sort[status])) S.sort[status] = sortOpts[0][0];
     const rang = status === "gesehen" && S.ansicht === "rangliste";
@@ -196,7 +234,7 @@
     const z = S.zufall; const genres = genresVon(S.filme.filter(f => z.quelle === "alle" ? f.status !== "merkliste" : f.status === "watchlist"));
     [...S.genre.zufall].forEach(g => { if (!genres.includes(g)) S.genre.zufall.delete(g); });
     const kand = zufallKandidaten(); const e = z.ergebnis && kand.find(f => f.id === z.ergebnis.id) ? z.ergebnis : null;
-    view.innerHTML = `<div class="kopf"><h1>Zufall</h1><p>Keine Ahnung, was ihr schauen wollt? Der Automat entscheidet.</p></div>
+    view.innerHTML = `<div class="kopf"><h1>Zufall</h1><p>Keine Ahnung, was ihr schauen wollt? Der Automat entscheidet – Filme mit mehr Bock kommen öfter dran.</p></div>
       <div class="chips">
         <button class="chip" data-q="watchlist" aria-pressed="${z.quelle === "watchlist"}">Nur Watchlist</button>
         <button class="chip" data-q="alle" aria-pressed="${z.quelle === "alle"}">Auch Gesehene</button>
@@ -247,7 +285,9 @@
     const kand = zufallKandidaten(); if (!kand.length || S.zufall.dreht) return;
     const z = S.zufall, slot = $("#slot"), fenster = $("#fenster"), band = $("#band"), erg = $("#ergebnis"), btn = $("#wuerfeln");
     z.dreht = true; z.ergebnis = null; slot.classList.remove("treffer"); slot.classList.add("dreht"); btn.disabled = true; btn.innerHTML = '<span class="lade"></span> Dreht …'; erg.innerHTML = "";
-    const ziel = kand[Math.floor(Math.random() * kand.length)];
+    // Gewichtete Auswahl: Filme mit mehr Bock kommen öfter dran
+    const gewichte = kand.map(bockGewicht); let rest = Math.random() * gewichte.reduce((a, b) => a + b, 0); let ziel = kand[kand.length - 1];
+    for (let i = 0; i < kand.length; i++) { rest -= gewichte[i]; if (rest <= 0) { ziel = kand[i]; break; } }
     // Dauer zufällig 5–10 s; Schritte werden geometrisch langsamer (70 ms → ~480 ms)
     const dauer = 5000 + Math.random() * 5000, d0 = 70, dn = 480;
     const r = 1 + d0 * (dn / d0 - 1) / dauer, n = Math.max(12, Math.round(Math.log(dn / d0) / Math.log(r)));
@@ -293,7 +333,7 @@
       if (basis !== "meine" && f.status === "merkliste") continue;
       const s = basis === "meine" && meine ? meine.punkte : schnitt(f); let gewicht;
       if (f.status === "gesehen") { if (s == null) gewicht = 1; else if (s >= 8) gewicht = 3; else if (s >= 6) gewicht = 1.5; else continue; }
-      else gewicht = 0.8;
+      else { const b = basis === "meine" ? (meinBock(f) || bockSchnitt(f)) : bockSchnitt(f); gewicht = b == null ? 0.8 : b >= 2.5 ? 1.8 : b >= 1.5 ? 1 : 0.4; }
       out.push({ tmdb_id: f.tmdb_id, gewicht, titel: f.titel });
     }
     return out;
@@ -307,8 +347,8 @@
         <button class="btn klein${S.empfVeraltet ? " primary" : ""}" id="neu-laden" type="button" title="Vorschläge neu berechnen">↻ ${S.empfVeraltet ? "Neue Vorschläge" : "Neu laden"}</button></div>
       ${schluesselHinweis()}
       <div class="umschalter"><button data-art="filme" aria-pressed="${!serien}" type="button">Filme</button><button data-art="serien" aria-pressed="${serien}" type="button">Serien</button></div>
-      ${basisChips}<div id="inhalt"><div class="empty"><span class="lade"></span></div></div>`;
-    hinweisBinden();
+      ${basisChips}${folgenChips()}<div id="inhalt"><div class="empty"><span class="lade"></span></div></div>`;
+    hinweisBinden(); personenBinden(view);
     view.querySelectorAll(".umschalter [data-art]").forEach(b => b.onclick = () => { S.empfArt = b.dataset.art; renderFuerDich(); });
     view.querySelectorAll(".chip[data-b]").forEach(c => c.onclick = () => { S.empfBasis = c.dataset.b; renderFuerDich(); });
     $("#neu-laden").onclick = () => { S.empfCache = {}; S.empfVeraltet = false; renderFuerDich(); };
@@ -319,13 +359,14 @@
         // Saatgut der eigenen Art plus „quer“: die Lieblinge der anderen Art (Serien färben Filmvorschläge und umgekehrt)
         const sd = serien ? window.Serien.seeds(basis) : seeds(basis);
         const quer = (serien ? seeds(basis) : window.Serien.seeds(basis)).filter(x => x.gewicht >= 1.5);
-        const gibtSaat = sd.length || quer.length;
+        const personen = personenSeeds(basis);
+        const gibtSaat = sd.length || quer.length || personen.length;
         let liste = [];
         if (serien) {
-          const r = gibtSaat ? await Store.film("serie_empfehlungen", { seeds: sd, quer, ausschluss: (S.serien || []).map(s => s.tmdb_id) }) : (basis === "alle" ? await Store.film("serie_beliebt") : { serien: [] });
+          const r = gibtSaat ? await Store.film("serie_empfehlungen", { seeds: sd, quer, personen, ausschluss: (S.serien || []).map(s => s.tmdb_id) }) : (basis === "alle" ? await Store.film("serie_beliebt") : { serien: [] });
           const vorhanden = new Set((S.serien || []).map(s => s.tmdb_id)); liste = (r.serien || []).filter(x => !vorhanden.has(x.tmdb_id));
         } else {
-          const r = gibtSaat ? await Store.film("empfehlungen", { seeds: sd, quer, ausschluss: S.filme.map(f => f.tmdb_id) }) : (basis === "alle" ? await Store.film("beliebt") : { filme: [] });
+          const r = gibtSaat ? await Store.film("empfehlungen", { seeds: sd, quer, personen, ausschluss: S.filme.map(f => f.tmdb_id) }) : (basis === "alle" ? await Store.film("beliebt") : { filme: [] });
           const vorhanden = new Set(S.filme.map(f => f.tmdb_id)); liste = (r.filme || []).filter(x => !vorhanden.has(x.tmdb_id));
         }
         S.empfCache[key] = { quelle: gibtSaat ? "eure" : "beliebt", filme: liste };
@@ -345,6 +386,13 @@
       ${liste.length ? `<div class="liste">${liste.map(serien ? window.Serien.zeileHTML : zeile).join("")}</div>` : `<div class="empty"><b>Nichts gefunden</b>${leer}</div>`}`;
     view.querySelectorAll(".chip[data-g]").forEach(c => c.onclick = () => { S.genre.fuerdich = c.dataset.g || null; renderFuerDich(); });
     if (serien) window.Serien.zeilenBinden($("#inhalt")); else zeilenBinden(alle);
+  }
+  // „Ihr folgt“: Chips mit allen gefolgten Personen (eigene hervorgehoben), Tipp öffnet die Personenseite
+  function folgenChips() {
+    const m = new Map(); for (const f of S.folgen) { const e = m.get(f.person_id) || { id: f.person_id, name: f.name, wer: [] }; e.wer.push(f.user_id); m.set(f.person_id, e); }
+    const l = [...m.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+    if (!l.length) return `<p class="folgen-hinweis">Tipp: Auf einer Personenseite „Folgen“ antippen – dann fließen Regisseure und Schauspieler hier mit ein.</p>`;
+    return `<div class="folgen"><span>Ihr folgt</span><div class="chips">${l.map(p => `<button class="chip${p.wer.includes(S.user.id) ? " eigene" : ""}" type="button" data-pid="${p.id}" data-pname="${esc(p.name)}" title="${p.wer.map(nameVon).map(esc).join(" & ")}">${esc(p.name)}${p.wer.length > 1 ? " ★★" : ""}</button>`).join("")}</div></div>`;
   }
   function zeile(f) {
     const drin = S.filme.find(x => x.tmdb_id === f.tmdb_id);
@@ -406,15 +454,21 @@
   }
   async function renderPerson() {
     const P = S.person; if (!P) return renderSuche();
-    const kopf = d => `<div class="person-kopf"><div class="foto">${d && d.bild ? `<img src="${bild(d.bild, "w185")}" alt="">` : esc((P.name || "?").split(" ").map(x => x[0]).join("").slice(0, 2))}</div>
-      <div><h1>${esc(d ? d.name : P.name)}</h1><p>${d ? esc([d.abteilung, d.anzahl ? d.anzahl + " Filme" : null, d.geboren ? "geboren " + datum(d.geboren) : null].filter(Boolean).join(" · ")) : "Filme werden geladen …"}</p></div></div>`;
+    const kopf = d => {
+      const andereFolger = d ? folgerVon(d.id).filter(u => u !== S.user.id).map(nameVon) : [];
+      return `<div class="person-kopf"><div class="foto">${d && d.bild ? `<img src="${bild(d.bild, "w185")}" alt="">` : esc((P.name || "?").split(" ").map(x => x[0]).join("").slice(0, 2))}</div>
+      <div class="text"><h1>${esc(d ? d.name : P.name)}</h1><p>${d ? esc([d.abteilung, d.anzahl ? d.anzahl + " Filme" : null, d.geboren ? "geboren " + datum(d.geboren) : null].filter(Boolean).join(" · ")) : "Filme werden geladen …"}</p>
+        ${d ? `<div class="reihe" style="margin-top:8px"><button class="btn klein${folgeIch(d.id) ? " primary" : ""}" id="folgen" type="button">${folgeIch(d.id) ? "★ Folge ich" : "☆ Folgen"}</button>${andereFolger.length ? `<small style="color:var(--fg3)">${esc(andereFolger.join(" & "))} folgt auch</small>` : ""}</div>` : ""}</div></div>`;
+    };
+    const folgenBinden = () => { const b = $("#folgen"); if (b && P.daten) b.onclick = async () => { const d = P.daten.person; if (await folgenUmschalten({ id: d.id, name: d.name, bild: d.bild, abteilung: d.abteilung })) { view.querySelector(".person-kopf").outerHTML = kopf(d); folgenBinden(); } }; };
     view.innerHTML = `<button class="zurueck" id="zurueck" type="button">← Zur Suche</button>${kopf(P.daten && P.daten.person)}<div id="inhalt"><div class="empty"><span class="lade"></span></div></div>`;
     $("#zurueck").onclick = () => { S.person = null; renderSuche(); };
+    folgenBinden();
     if (!P.daten) {
       try { P.daten = await Store.film("person", P.id ? { id: P.id } : { name: P.name }); }
       catch (x) { if (S.person === P) $("#inhalt").innerHTML = `<div class="empty"><b>Keine Filme gefunden</b>${esc(x.code === "person_unbekannt" ? "Diese Person ist in der Filmdatenbank nicht bekannt." : fehlerText(x))}</div>`; return; }
       if (S.person !== P || S.tab !== "suche") return;
-      view.querySelector(".person-kopf").outerHTML = kopf(P.daten.person);
+      view.querySelector(".person-kopf").outerHTML = kopf(P.daten.person); folgenBinden();
     }
     const serienDa = (P.daten.serien || []).length, filmeDa = (P.daten.filme || []).length;
     if (S.personArt === "serien" && !serienDa) S.personArt = "filme";
@@ -446,14 +500,14 @@
       const { film } = await Store.film("details", { tmdb_id });
       delete film.omdb_aktiv;
       const neu = await Store.filmAnlegen({ ...film, status, hinzugefuegt_von: S.user.id, gesehen_am: status === "gesehen" ? heute() : null });
-      neu.bewertungen = []; S.filme.unshift(neu); S.empfVeraltet = true;
+      neu.bewertungen = []; neu.vorfreude = []; S.filme.unshift(neu); S.empfVeraltet = true;
       toast(status === "gesehen" ? "Als gesehen eingetragen" : status === "merkliste" ? "Nur für dich gemerkt" : "Auf die Watchlist gesetzt");
       sheet.innerHTML = ""; render();
       if (status === "gesehen") oeffneFilm(neu);
       return neu;
     } catch (x) { toast(fehlerText(x)); if (btn) { btn.disabled = false; btn.textContent = status === "gesehen" ? "Schon gesehen" : status === "merkliste" ? "Merken" : "+ Watchlist"; } }
   }
-  function ersetze(neu) { const i = S.filme.findIndex(f => f.id === neu.id); if (i >= 0) { neu.bewertungen = S.filme[i].bewertungen || []; S.filme[i] = neu; } return neu; }
+  function ersetze(neu) { const i = S.filme.findIndex(f => f.id === neu.id); if (i >= 0) { neu.bewertungen = S.filme[i].bewertungen || []; neu.vorfreude = S.filme[i].vorfreude || []; S.filme[i] = neu; } return neu; }
   async function statusSetzen(f, status, leise) {
     try {
       const daten = { status, gesehen_am: status === "gesehen" ? (f.gesehen_am || heute()) : null };
@@ -493,7 +547,7 @@
     $(".zu", sheet).onclick = schliessen;
     return $(".panel", sheet);
   }
-  const personHTML = (p, unter) => `<button class="person" type="button" data-pid="${p.id || ""}" data-pname="${esc(p.name)}"><div class="foto">${p.bild ? `<img src="${bild(p.bild, "w185")}" alt="" loading="lazy">` : esc((p.name || "?").split(" ").map(x => x[0]).join("").slice(0, 2))}</div><b>${esc(p.name)}</b>${unter ? `<span>${esc(unter)}</span>` : ""}</button>`;
+  const personHTML = (p, unter) => `<button class="person${p.id && folgerVon(p.id).length ? " gefolgt" : ""}" type="button" data-pid="${p.id || ""}" data-pname="${esc(p.name)}"><div class="foto">${p.bild ? `<img src="${bild(p.bild, "w185")}" alt="" loading="lazy">` : esc((p.name || "?").split(" ").map(x => x[0]).join("").slice(0, 2))}</div><b>${esc(p.name)}</b>${unter ? `<span>${esc(unter)}</span>` : ""}</button>`;
   function anbieterHTML(a) {
     if (!a || !(a.streamen || []).length && !(a.leihen || []).length && !(a.kaufen || []).length) return `<p class="text">Derzeit kein Streaming-Angebot in Deutschland bekannt.${a && a.link ? ` <a href="${esc(a.link)}" target="_blank" rel="noopener">Bei JustWatch nachsehen →</a>` : ""}</p>`;
     const gruppe = (t, l) => (l || []).length ? `<div class="gruppe"><span>${t}</span>${l.map(p => p.logo ? `<img src="${bild(p.logo, "w92")}" alt="${esc(p.name)}" title="${esc(p.name)}">` : `<span class="name">${esc(p.name)}</span>`).join("")}</div>` : "";
@@ -589,15 +643,16 @@
     const p = panel(detailHTML(f, true)); trailerBinden(f); personenBinden(p); angeboteLaden($("#angebote", p), f, "film");
     const a = $("#aktionen", p);
     a.innerHTML = f.status === "watchlist"
-      ? `<div class="status-reihe"><button class="btn primary" id="gesehen" type="button">${ICON.gesehen} Gesehen – jetzt bewerten</button><button class="btn" id="merken" type="button" title="Von der gemeinsamen Watchlist auf deine private Merkliste">Nur merken</button></div>`
+      ? `<div class="status-reihe"><button class="btn primary" id="gesehen" type="button">${ICON.gesehen} Gesehen – jetzt bewerten</button><button class="btn" id="merken" type="button" title="Von der gemeinsamen Watchlist auf deine private Merkliste">Nur merken</button></div>${bockBoxHTML(f)}`
       : f.status === "merkliste"
       ? `<p class="meta-zeile" style="margin-top:14px">${f.hinzugefuegt_von === S.user.id ? "Steht nur auf deiner Merkliste – nicht auf der gemeinsamen Watchlist." : `Steht auf ${esc(nameVon(f.hinzugefuegt_von))}s privater Merkliste.`}</p>
-         <div class="status-reihe"><button class="btn primary" id="watchlist" type="button">Auf unsere Watchlist</button><button class="btn" id="gesehen" type="button">${ICON.gesehen} Gesehen</button></div>`
+         <div class="status-reihe"><button class="btn primary" id="watchlist" type="button">Auf unsere Watchlist</button><button class="btn" id="gesehen" type="button">${ICON.gesehen} Gesehen</button></div>${bockBoxHTML(f)}`
       : `<div class="status-reihe"><label class="feld" style="flex:1;margin:0"><span>Gesehen am</span><input type="date" id="gesehen_am" value="${f.gesehen_am || ""}"></label><button class="btn" id="watchlist" type="button" style="align-self:flex-end">Zurück auf Watchlist</button></div>
          <h3>Unsere Bewertung</h3>${bewertungenHTML(f)}`;
     if ($("#gesehen", p)) $("#gesehen", p).onclick = () => statusSetzen(f, "gesehen");
     if ($("#watchlist", p)) $("#watchlist", p).onclick = () => statusSetzen(f, "watchlist");
     if ($("#merken", p)) $("#merken", p).onclick = () => statusSetzen(f, "merkliste");
+    bockBinden(f, p);
     if ($("#gesehen_am", p)) $("#gesehen_am", p).onchange = ev => gesehenAm(f, ev.target.value);
     bewertungBinden(f, p);
     $("#unten", p).innerHTML = `<div class="meta-zeile">Eingetragen${f.hinzugefuegt_von ? " von " + esc(nameVon(f.hinzugefuegt_von)) : ""} am ${datum(f.erstellt_am)}${f.imdb_id ? ` · <a href="https://www.imdb.com/title/${esc(f.imdb_id)}/" target="_blank" rel="noopener">IMDb</a>` : ""}${f.lb_url ? ` · <a href="${esc(f.lb_url)}" target="_blank" rel="noopener">Letterboxd</a>` : ""}</div>
@@ -687,7 +742,7 @@
       try { await Store.schluesselSetzen(k, v); S.keys[k] = true; S.empfVeraltet = true; toast("Gespeichert"); einstellungen(); render(); }
       catch (x) { toast("Fehler: " + x.message); b.disabled = false; }
     });
-    $("#abmelden", p).onclick = async () => { await Store.abmelden(); S.filme = []; S.serien = []; S.empfVeraltet = true; zeigeLogin(); };
+    $("#abmelden", p).onclick = async () => { await Store.abmelden(); S.filme = []; S.serien = []; S.folgen = []; S.empfVeraltet = true; zeigeLogin(); };
   }
 
   // Gemeinsame Hilfen für serien.js

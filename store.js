@@ -17,8 +17,9 @@ window.Store = (function () {
 
     async filme() {
       const filme = pruefe(await sb.from("filme").select("*").order("erstellt_am", { ascending: false }));
-      const bew = pruefe(await sb.from("bewertungen").select("*"));
-      for (const f of filme) f.bewertungen = bew.filter(b => b.film_id === f.id);
+      const [bew, vf] = await Promise.all([sb.from("bewertungen").select("*"), sb.from("vorfreude").select("*")]);
+      pruefe(bew); const vorfreude = vf.error ? [] : vf.data;
+      for (const f of filme) { f.bewertungen = bew.data.filter(b => b.film_id === f.id); f.vorfreude = vorfreude.filter(v => v.film_id === f.id); }
       return filme;
     },
     async filmAnlegen(daten) { return pruefe(await sb.from("filme").insert(daten).select("*").single()); },
@@ -43,6 +44,12 @@ window.Store = (function () {
       return { ...b, punkte: Number(b.punkte) };
     },
     async serieBewertungLoeschen(serie_id, user_id, staffel, folge) { pruefe(await sb.from("serien_bewertungen").delete().match({ serie_id, user_id, staffel: staffel || 0, folge: folge || 0 })); },
+
+    async vorfreudeSetzen(film_id, user_id, sterne) { return pruefe(await sb.from("vorfreude").upsert({ film_id, user_id, sterne }, { onConflict: "film_id,user_id" }).select("*").single()); },
+    async vorfreudeLoeschen(film_id, user_id) { pruefe(await sb.from("vorfreude").delete().match({ film_id, user_id })); },
+    async folgen() { return pruefe(await sb.from("personen_folgen").select("*").order("name")); },
+    async folgenSetzen(p, user_id) { return pruefe(await sb.from("personen_folgen").upsert({ person_id: p.id, name: p.name, bild: p.bild || null, abteilung: p.abteilung || null, user_id }, { onConflict: "person_id,user_id" }).select("*").single()); },
+    async entfolgen(person_id, user_id) { pruefe(await sb.from("personen_folgen").delete().match({ person_id, user_id })); },
 
     async schluesselStatus() { return pruefe(await sb.rpc("schluessel_status")); },
     async schluesselSetzen(schluessel, wert) { pruefe(await sb.rpc("schluessel_setzen", { p_schluessel: schluessel, p_wert: wert })); },
