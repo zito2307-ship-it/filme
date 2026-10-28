@@ -6,7 +6,7 @@
   const S = { session: null, user: null, profile: [], filme: [], serien: [], folgen: [], keys: { tmdb: false, omdb: false }, tab: "watchlist",
     genre: { watchlist: null, gesehen: null, zufall: new Set(), fuerdich: null }, sort: { watchlist: "neu", gesehen: "neu" },
     suche: "", ergebnisse: null, personen: null, person: null, personSort: "beliebt", beliebt: null, empfCache: {}, empfVeraltet: false, empfBasis: "alle",
-    ansicht: "raster", rang: { wer: "beide", nur: "alle" }, empfArt: "filme", personArt: "filme", wlAnsicht: "gemeinsam",
+    ansicht: "raster", rang: { wer: "beide", nur: "alle" }, empfArt: "filme", personArt: "filme", wlAnsicht: "gemeinsam", gesehenWer: "alle",
     zufall: { quelle: "watchlist", max: 0, ergebnis: null, dreht: false, ton: localStorage.getItem("filmabend-ton") !== "aus" } };
 
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -99,6 +99,8 @@
     S.filme.forEach(f => (f.bewertungen || []).forEach(b => mitTokens(b).forEach(x => { if (x !== "allein" && !x.startsWith("@")) s.add(x); })));
     return [...s].sort((a, b) => a.localeCompare(b, "de"));
   }
+  // Hat uid den Film gesehen? Eigene Bewertung oder vom anderen als „mit uid“ angegeben
+  const hatGesehen = (f, uid) => (f.bewertungen || []).some(b => b.user_id === uid || mitTokens(b).includes("@" + uid));
   const merklisteVon = (f, uid) => f.status === "merkliste" && f.hinzugefuegt_von === uid;
   const statusText = f => f.status === "gesehen" ? "✓ Schon gesehen" : f.status === "watchlist" ? "✓ Auf der Watchlist" : f.hinzugefuegt_von === S.user.id ? "✓ Auf deiner Merkliste" : `✓ Auf ${esc(nameVon(f.hinzugefuegt_von))}s Merkliste`;
   // Bock-Wertung (Vorfreude) 1–3 Sterne für Watchlist/Merkliste
@@ -165,7 +167,12 @@
   function renderListe(status) {
     if (status === "watchlist" && S.wlAnsicht !== "gemeinsam" && S.wlAnsicht !== S.user.id && !S.profile.some(p => p.id === S.wlAnsicht)) S.wlAnsicht = "gemeinsam";
     const merk = status === "watchlist" && S.wlAnsicht !== "gemeinsam" ? S.wlAnsicht : null;
-    const alle = merk ? S.filme.filter(f => merklisteVon(f, merk)) : S.filme.filter(f => f.status === status);
+    let alle = merk ? S.filme.filter(f => merklisteVon(f, merk)) : S.filme.filter(f => f.status === status);
+    const werFilter = status === "gesehen" && S.ansicht !== "rangliste";
+    if (werFilter && S.gesehenWer !== "alle" && S.gesehenWer !== "gemeinsam" && !S.profile.some(p => p.id === S.gesehenWer)) S.gesehenWer = "alle";
+    const alleGesehen = alle;
+    if (werFilter && S.gesehenWer === "gemeinsam") alle = alle.filter(gemeinsam);
+    else if (werFilter && S.gesehenWer !== "alle") alle = alle.filter(f => hatGesehen(f, S.gesehenWer));
     const genres = genresVon(alle);
     const g = S.genre[status] && genres.includes(S.genre[status]) ? S.genre[status] : (S.genre[status] = null);
     const liste = sortiere(g ? alle.filter(f => f.genres.includes(g)) : alle, S.sort[status]);
@@ -178,16 +185,18 @@
     view.innerHTML = `<div class="kopf"><h1>${titel}</h1><p>${alle.length} ${alle.length === 1 ? "Film" : "Filme"}${merk ? (merk === S.user.id ? " nur für dich gemerkt" : " gemerkt") : status === "watchlist" ? " zum Schauen" : ""}</p></div>
       ${schluesselHinweis()}${wlUmschalter}
       ${status === "gesehen" && alle.length ? `<div class="umschalter"><button data-a="raster" aria-pressed="${!rang}" type="button">Alle Filme</button><button data-a="rangliste" aria-pressed="${rang}" type="button">Rangliste</button></div>` : ""}
+      ${werFilter && alleGesehen.length ? `<div class="chips wer-chips"><button class="chip" data-wer="alle" aria-pressed="${S.gesehenWer === "alle"}">Alle</button>${S.profile.map(p => `<button class="chip" data-wer="${p.id}" aria-pressed="${S.gesehenWer === p.id}">${esc(p.name)}</button>`).join("")}<button class="chip" data-wer="gemeinsam" aria-pressed="${S.gesehenWer === "gemeinsam"}">Gemeinsam</button></div>` : ""}
       ${rang ? ranglisteHTML(alle) : `
       ${genres.length > 1 ? `<div class="chips"><button class="chip" data-g="" aria-pressed="${!g}">Alle</button>${genres.map(x => `<button class="chip" data-g="${esc(x)}" aria-pressed="${g === x}">${esc(x)}</button>`).join("")}</div>` : ""}
       ${alle.length ? `<div class="werkzeug"><span>${liste.length} angezeigt</span><select id="sort">${sortOpts.map(o => `<option value="${o[0]}" ${S.sort[status] === o[0] ? "selected" : ""}>${o[1]}</option>`).join("")}</select></div>` : ""}
       ${liste.length ? `<div class="raster">${liste.map(karte).join("")}</div>`
-        : `<div class="empty"><b>${merk ? (merk === S.user.id ? "Deine Merkliste ist leer" : `${esc(nameVon(merk))} hat noch nichts gemerkt`) : status === "watchlist" ? "Noch nichts auf der Watchlist" : "Noch nichts gesehen"}</b>${merk ? (merk === S.user.id ? "Hier landen Filme, die du dir nur für dich merkst – über „Merken“ in der Suche." : "") : status === "watchlist" ? "Über „Suchen“ Filme eintragen." : "Markiere einen Film als gesehen, dann könnt ihr ihn bewerten."}</div>`}`}`;
+        : `<div class="empty"><b>${merk ? (merk === S.user.id ? "Deine Merkliste ist leer" : `${esc(nameVon(merk))} hat noch nichts gemerkt`) : status === "watchlist" ? "Noch nichts auf der Watchlist" : werFilter && S.gesehenWer !== "alle" && alleGesehen.length ? (S.gesehenWer === "gemeinsam" ? "Noch kein Film als gemeinsam geschaut markiert" : `${esc(nameVon(S.gesehenWer))} hat noch keinen Film bewertet`) : "Noch nichts gesehen"}</b>${merk ? (merk === S.user.id ? "Hier landen Filme, die du dir nur für dich merkst – über „Merken“ in der Suche." : "") : status === "watchlist" ? "Über „Suchen“ Filme eintragen." : "Markiere einen Film als gesehen, dann könnt ihr ihn bewerten."}</div>`}`}`;
     hinweisBinden();
     view.querySelectorAll(".umschalter [data-wl]").forEach(b => b.onclick = () => { S.wlAnsicht = b.dataset.wl; renderListe("watchlist"); });
+    view.querySelectorAll(".chip[data-wer]").forEach(c => c.onclick = () => { S.gesehenWer = c.dataset.wer; renderListe("gesehen"); });
     view.querySelectorAll(".umschalter [data-a]").forEach(b => b.onclick = () => { S.ansicht = b.dataset.a; renderListe(status); });
     if (rang) { ranglisteBinden(status); return; }
-    view.querySelectorAll(".chip").forEach(c => c.onclick = () => { S.genre[status] = c.dataset.g || null; renderListe(status); });
+    view.querySelectorAll(".chip[data-g]").forEach(c => c.onclick = () => { S.genre[status] = c.dataset.g || null; renderListe(status); });
     const sel = $("#sort"); if (sel) sel.onchange = () => { S.sort[status] = sel.value; renderListe(status); };
     kartenBinden();
   }
